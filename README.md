@@ -1,6 +1,6 @@
 # pi-multiloop
 
-An autoloop/autoresearch extension for [Pi](https://pi.dev) coding agent that lets you run multiple loops in the same worktree with isolated state per lane.
+A multi-lane autoloop/autoresearch extension for [Pi](https://pi.dev) that lets you run multiple loops in the same worktree with isolated state per lane.
 
 ## Why
 
@@ -9,7 +9,7 @@ Other loop extensions only support one loop per session or worktree. If you're t
 ## Features
 
 - **Multi-loop isolation** — run multiple loops on the same worktree, each with its own lane and state
-- **Four modes** — flexibly supports different types of loops:
+- **Four modes** — supports different types of loops:
   - **Optimize** — the classic edit, measure, keep/revert cycle
   - **Research** — log results from ablations or parameter sweeps without keep/revert
   - **Dev** — implement, test, commit with iteration tracking
@@ -19,7 +19,7 @@ Other loop extensions only support one loop per session or worktree. If you're t
 - **Bounded stop conditions** — cap a loop by iteration count or metric target at setup; the bound lives in loop state, so it survives compaction and restarts
 - **Confidence scoring** — supports Median Absolute Deviation (MAD) to handle noisy benchmarks like GPU timing or training loss
 - **Durable history** — append-only JSONL per lane, survives context resets and restarts
-- **Mechanical continuation** — loop-owned turns automatically queue the next required action while the loop remains running, while still allowing brief answers to user status questions
+- **Mechanical continuation** — loop-owned turns automatically queue the next required action while the loop remains running, while still answering status questions
 - **Compaction-aware resume** — when pi auto-compacts during a loop explicitly started or resumed in the current session, pi-multiloop injects a loop-aware resume prompt after the interrupted turn ends
 - **Escalation** — refines strategy automatically after consecutive failures
 - **Pi-native status surfaces** — footer status, resumable-loop notices, and `/multiloop status` / `/multiloop ls` views
@@ -30,7 +30,7 @@ Other loop extensions only support one loop per session or worktree. If you're t
 pi install git:https://github.com/drvova/pi-multiloop
 ```
 
-## Quick Start
+## Quick start
 
 ```bash
 # Show current loop state. If there is no existing loop state, this launches the setup guide.
@@ -80,7 +80,7 @@ Pick a task, implement, test, commit. General development with iteration trackin
 ### Punchlist
 Parse a markdown checklist, pick the next open (`[ ]`) or partial (`[~]`) item, implement, verify, and check it off (`[x]`) or leave it partial with a reason. Punchlist loops default to log/progress acceptance using the `open_or_partial_items` metric; use keep/revert only for explicit metric optimization goals.
 
-## Compound Verifiers
+## Compound verifiers
 
 `multiloop_measure` accepts optional verification checks alongside metric measurements:
 
@@ -110,7 +110,7 @@ One measurement is right for a **deterministic** metric — bundle size, LOC, `o
 
 Nothing in the recorded state can tell those two cases apart, so keep/revert loops print a note when a decision rests on a single measurement rather than refusing it. The note is advisory; heed it when the metric is noisy. A keep also moves `currentMetric`, so a keep driven by jitter leaves the next iteration having to beat an optimistic outlier — the error compounds instead of washing out.
 
-## Stop Conditions
+## Stop conditions
 
 A running loop auto-continues after every iteration. By default it keeps going until you pause or stop it, or until escalation exhausts its pivots. The setup guide also asks how the loop should end, and that answer is recorded in loop state rather than left in the conversation — so it survives compaction and session restarts.
 
@@ -128,7 +128,7 @@ Two consequences worth knowing:
 - **A goal already met at baseline completes immediately.** If the first measurement already satisfies `targetMetric` — a punchlist with nothing open, a latency budget the repo already meets — the loop completes without iterating instead of sending the agent to look for work that does not exist. An iteration cap cannot fire here, because baseline is not an iteration.
 - **Resume refuses a loop whose condition is still met.** Resuming would grant one bonus iteration and then re-complete, so `multiloop_resume` and `/multiloop resume` decline and tell you why. Start a new run, or raise the bound in the lane's `state.json`. Escalation-stopped loops carry no stop condition and stay resumable.
 
-## How State Works
+## How state works
 
 pi-multiloop keeps everything in a single `.multiloop/` directory at your repo root:
 
@@ -152,8 +152,7 @@ your-repo/
             └── state.json
 ```
 
-### File Reference
-
+### File reference
 | File | Written when | Contents |
 |---|---|---|
 | `registry.json` | Loop start/stop/archive | Index of all loops (lane, run-tag, mode, status, verify command). One file per repo. |
@@ -199,7 +198,7 @@ Add this to `.gitignore` if you don't want loop state in version control:
 
 You can also commit the state if you want a record of optimization runs alongside the code. The JSONL results are human-readable and diff-friendly.
 
-### Path Conventions
+### Path conventions
 
 Everything lives under `.multiloop/` relative to your repo root (pi's cwd).
 
@@ -250,22 +249,22 @@ Randomisation applies to **values**, never to **coverage**: the exhaustive layer
 
 A green suite only measures the code you chose to exercise. Before calling a change verified, break it on purpose and confirm the suite goes red — revert a guard, flip a comparison, drop a persistence call. If a mutation survives, the test is decorative.
 
-## Related Projects
+## Related projects
 
-### Autoresearch / Autoloop
+### Autoresearch / autoloop
 
 - [karpathy/autoresearch](https://github.com/karpathy/autoresearch) — The original: edit → benchmark → keep/revert → repeat. Established the pattern.
 - [lhl/codex-autoresearch](https://github.com/lhl/codex-autoresearch) — Multi-loop-per-worktree support via `LANE` + `RUN_TAG` isolation for Codex. pi-multiloop is the pi equivalent.
 - [uditgoenka/autoresearch](https://github.com/uditgoenka/autoresearch) — Claude Code / OpenCode / Codex autoresearch skill. Generalizes beyond ML to any domain with a measurable metric.
 - [armgabrielyan/autoloop](https://github.com/armgabrielyan/autoloop) — Agent-agnostic autoloop with repo-aware setup inference, guardrails, and keep/discard verdicts. Works with Claude Code, Codex, Cursor, Gemini CLI.
 
-### Awesome Lists
+### Awesome lists
 
 - [WecoAI/awesome-autoresearch](https://github.com/WecoAI/awesome-autoresearch) — Use cases with actual optimization traces (Vesuvius Challenge, Bitcoin prediction, agent improvement)
 - [yibie/awesome-autoresearch](https://github.com/yibie/awesome-autoresearch) — Tools + real-world use cases (stock portfolios, cold email, fare search)
 - [alvinreal/awesome-autoresearch](https://github.com/alvinreal/awesome-autoresearch) — Self-improving agents, end-to-end research automation, curated papers
 
-### Pi Extensions
+### Pi extensions
 
 - [davebcn87/pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) — Autonomous optimization loops for pi with TUI dashboard, MAD confidence scoring, and branch workflow
 - [mikeyobrien/pi-autoloop](https://github.com/mikeyobrien/pi-autoloop) — Autonomous LLM loops for pi

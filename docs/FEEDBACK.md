@@ -1,0 +1,1033 @@
+# pi-multiloop — Workflow Review Feedback
+
+A walkthrough of the repo as both a first-time user and an agent operating
+inside an active loop, looking for confusing surfaces, surprises, or things
+that look likely to bite in practice.
+
+## Section 1 — Initial Walkthrough (2026-05-07)
+
+This section is the first pass: read README → skill → extension code → docs,
+imagining the path a user and an agent take through the system, and noting
+points where intent and behavior diverge or where the surface is rougher than
+it needs to be.
+
+### A. Surface mismatches between docs and code
+
+1. **"TUI dashboard" is overpromised.**
+   `README.md:24` and `docs/PLAN.md` advertise a "TUI dashboard with live
+   status and metric history per lane", and `ui.ts` does build a real columnar
+   table (`formatDashboardText` at `extensions/pi-multiloop/ui.ts:49-81`,
+   plus per-lane `formatLoopSummary`). But nothing in `index.ts` actually
+   renders that widget. The real dashboard surface today is:
+   - the one-line `ctx.ui.setStatus(...)` written in `updateStatus`
+     (`index.ts:1446-1454`),
+   - the `multiloop-resume` startup notice rendered via `Text`,
+   - and the markdown blob `/multiloop status` emits via
+     `buildIterationContext` (`loop.ts:205-271`).
+   No call site references `buildDashboardRows` or `formatDashboardText`. A
+   user expecting an in-pi widget after starting two loops will instead see a
+   single "multiloop: perf#3, quant#1" status line. Either wire the dashboard
+   widget up or soften the README copy.
+
+2. **`/multiloop status` and the "dashboard" use different formats.**
+   `showStatus` (`index.ts:1093-1126`) emits a multi-line markdown chunk per
+   loop. The dashboard helpers in `ui.ts` produce a fixed-width table. Two
+   render styles for what is conceptually the same view; nothing routes the
+   user to one or the other.
+
+3. **CHANGELOG/version drift.**
+   `package.json` is at `0.2.0` (commit `ad56481`), but the two big v0.2
+   features land *after* it: compound verification checks (`2721e0b`) and the
+   guided loop setup (`151493b`). `CHANGELOG.md` keeps them under
+   `## Unreleased`. A user reading "What's in 0.2.0?" will not find them. A
+   real `0.2.x` (or `0.3.0`) release is implied but not committed, so
+   `pi install npm:pi-multiloop` does not yet match the README.
+
+4. **`docs/PLAN.md` checklist still shows everything unchecked.**
+   The implementation checklist at `docs/PLAN.md:55-67` has 12 unchecked items
+   for work that is clearly done (lanes/state/metrics/loop/modes/index/ui/
+   skill plus tests). A new contributor reading PLAN first will assume the
+   project is unbuilt.
+
+### B. Command surface is inconsistent
+
+5. **Argument shapes differ across subcommands** (all in `index.ts:1207-1402`):
+
+   | Command | Accepts | Notes |
+   |---|---|---|
+   | `stop [lane]` | lane name (no run-tag) | filters by lane |
+   | `pause [lane]` | lane name (no run-tag) | filters by lane |
+   | `resume <id>` | requires `lane/run-tag` | bare lane fails |
+   | `rm <id>` | requires `lane/run-tag` | bare lane fails |
+   | `archive [id]` | bare = archive-all-eligible; arg must be `lane/run-tag` | a bare lane fails |
+   | `ls` / `status` | none | |
+
+   Three different shapes (`lane`, `lane/runTag`, none) for what feels like
+   the same concept. Users who try `/multiloop resume perf` or
+   `/multiloop archive perf` will hit "Invalid lane/run-tag" errors despite
+   `pause perf` and `stop perf` working.
+
+6. **Lane-only resume would be the natural shortcut.**
+   When a lane has exactly one resumable run, `/multiloop resume <lane>`
+   should just pick it. Today it errors. This is the friendliest UX win on
+   the command surface.
+
+7. **Run-tag format is awkward to retype.**
+   `generateRunTag()` produces `run-YYYYMMDD-HHMMSS`
+   (`lanes.ts:139-144`). The startup notice helps, but anyone resuming from a
+   second terminal is going to alt-tab to the registry. A short id (e.g.
+   `r-3a9f`) or `lane@N` would be friendlier.
+
+### C. Inline `/multiloop <goal>` foot-guns
+
+8. **Default lane = mode name → silent collisions.**
+   The fallback in `index.ts:1404-1406` sets `lane = mode` when no
+   `lane:` is present in the inline goal. Two `/multiloop improve …` calls
+   without explicit lanes both land in lane `"optimize"`. They get distinct
+   run-tags so the on-disk state is fine, but `findLane(...)` (`index.ts:1435-1444`)
+   matches by lane name and returns the first one. The second loop becomes
+   unreachable via tools until it's resumed by run-tag. The README explicitly
+   advertises starting a second loop in the same worktree (`README.md:48-52`),
+   so this collision is on the happy path.
+
+9. **The whole inline string becomes the goal.**
+   `goal: trimmed` (`index.ts:1422`) stores the full prompt — including the
+   `verify: \`...\``, `guard: \`...\``, `prompt verifier: \`...\`` fragments.
+   Goal text shown in `loopSummary` and resume prompts is therefore noisy.
+   Consider stripping the parsed key/value parts before persisting the goal.
+
+10. **`extractQuotedOption` handles backticks and double quotes only.**
+    Single quotes — natural in shell-style prose — are silently ignored. So
+    `/multiloop improve latency, verify: './bench.py'` falls back to the
+    literal default verify command `echo 'TODO: set verify command'`
+    (`index.ts:1407`) without any warning.
+
+### D. Mode behavior is uneven
+
+11. **Punchlist mode has no convergence wiring.**
+    `modes.ts` exports `parsePunchlist`, `nextUncheckedItem`, `checkOffItem`,
+    and `punchlistProgress`, but none of those functions are imported or
+    called in `index.ts` or `loop.ts`. The skill simply tells the agent
+    "Read the checklist file, pick the next unchecked item, implement it,
+    run guard, check it off." The README/skill claim "Done when all items
+    pass" but there is no automated convergence — the agent must self-stop.
+    Either wire `punchlistProgress` into a stop check inside `multiloop_log`
+    when mode is `punchlist`, or remove the unused parser and document
+    explicitly that punchlist is just a labeled dev loop.
+
+12. **Punchlist + checks falls through to the optimize keep/revert path.**
+    `assessAcceptance` (`verifiers.ts:70-101`) special-cases `research` and
+    `dev` to recommend `log`. `punchlist` is not in that list, so a punchlist
+    loop with a `guardCommand` will get `recommendedAction: "keep"` or
+    `"revert"` based on metric improvement — likely not what a punchlist
+    user wants, since checking off an item is the unit of progress, not
+    metric movement.
+
+13. **`hasMetric: true` for `punchlist` is misleading.**
+    `modes.ts:23-30` advertises punchlist as having a metric, but the canonical
+    punchlist signal is `progress = done/total`, which the engine never
+    computes. Same for research/dev: the metric is real, but the *direction*
+    field's "lower is better" default is meaningless for "log every result".
+
+### E. Multi-doc duplication of the setup contract
+
+14. **The setup-guide rules live in three places** that must be kept in sync:
+    - `skills/multiloop/skill.md` (skill body),
+    - `docs/LOOP_GUIDE.md` (longer human reference),
+    - `buildSetupGuidePrompt()` in `extensions/pi-multiloop/index.ts:259-286`
+      (what actually gets sent to the model).
+
+    They already drift: `LOOP_GUIDE.md` lists "Rollback safety" and a stop
+    condition guidance the runtime prompt does not mention; the skill says
+    "Acceptance policy: metric must improve **and** every check passes" and
+    the runtime prompt says "metric improves **and** every check passes"
+    while `verifiers.ts` formats it as "metric ... improved/did not improve;
+    all checks passed/failed checks: ...". Pick one canonical phrasing and
+    have the others reference it.
+
+### F. Compound-verifier flow is strict in surprising ways
+
+15. **`multiloop_decide` requires exact-array measurements equality.**
+    `sameMeasurements` (`index.ts:77-79`) does element-wise equality. If the
+    agent re-measures (e.g., to bump confidence) between `multiloop_measure`
+    and `multiloop_decide`, the decide call will be rejected with a
+    "Measurement mismatch" message and the agent has to call measure again.
+    Documented in the error string, but easy to trip on. A tolerant variant
+    that accepts "agent passed the recorded array OR a fresh array, in which
+    case re-record" would be friendlier.
+
+16. **Synthetic-failed-check pattern is hidden until you read the code.**
+    `ensureRequiredChecks` (`verifiers.ts:30-68`) silently injects a
+    `passed: false` check when a configured guard or prompt verifier is not
+    represented in `multiloop_measure.checks`. Good safety; not surfaced in
+    the README, only in the skill. A first-time agent will see "Acceptance:
+    FAIL — failed checks: guard" and not know that an empty `checks: []` was
+    treated as "guard didn't run". Add an explicit message like
+    "Configured guard not reported; treated as failed. Re-run guard and call
+    multiloop_measure again."
+
+### G. Auto-continuation has subtle edge cases
+
+17. **`loopTurnActive` is set on every loop tool, then resume happens after
+    `agent_end`.**
+    Together this means: any loop-tool turn ends → another follow-up prompt
+    is queued unless the user types something or the loop is paused/stopped.
+    If the agent says "I'm wrapping up for the day" without calling
+    `/multiloop pause`, it will be prodded into another iteration. The skill
+    tells the agent not to ask "should I continue?" mid-approved loop, but
+    a graceful "stop here" without an explicit slash command is hard.
+
+18. **`shouldContinueAfterUserInput` regex misses ambiguous suspensions.**
+    The regex (`index.ts:81-91`) matches `stop|pause|halt|...` only when
+    paired with `loop|multiloop|iteration|work`, plus a `do not continue`
+    branch. Plain "let's hold on" / "wait" / "let me think" do not clear
+    `loopTurnActive`, so the auto-continue fires anyway. Consider widening
+    or, better, requiring an explicit slash command to stop auto-continue
+    (and make the auto-continue more conservative when in doubt).
+
+### H. State / registry status terminology
+
+19. **Snapshot vs registry status disagree by design.**
+    Already filed in `docs/TODO.md` and explained in `docs/STATE.md`: state
+    `running` ↔ registry `active`, state `stopped` ↔ registry `completed`.
+    For a user (or agent) inspecting raw files, the same loop appearing as
+    `active` in `registry.json` and `running` in `state.json` is needless
+    cognitive load. Pick one vocabulary or document the mapping at the top
+    of `state.json`/`registry.json` itself (a `_doc` field, or a comment in
+    the README's "How State Works").
+
+20. **`runningStates()` does not mean "agent is currently iterating".**
+    It only means "attached AND `state.status === 'running'`" (`index.ts:68-70`).
+    `STATE.md` calls this out, but it bites in the auto-continue logic where
+    it is the gating condition. Naming this `attachedRunningStates()` would
+    reduce reader confusion.
+
+### I. Smaller things
+
+21. **`/multiloop archive someLane` (no slash) errors out.** Inconsistent
+    with `pause`/`stop`. Either accept lane-only and archive all matching
+    runs, or document the asymmetry in `help`.
+22. **Help text doesn't list `guide` / `wizard` / `setup` aliases**
+    (`index.ts:1364-1367`). They work, but only `index.ts` knows.
+23. **`docs/STATE.md` is excellent design rationale but is not linked
+    from README**. New contributors will not find it.
+24. **`tests/verifiers.test.ts` is 80 lines** (`tests/verifiers.test.ts`),
+    light coverage for what is now the central acceptance logic. Add cases
+    for: missing-guard synthetic check, prompt-verifier-only configurations,
+    research/dev mode falling through to `log`, and punchlist behavior once
+    decided.
+25. **No tests cover the `/multiloop` command handler** itself — only the
+    pure helpers it builds. Argument parsing (`extractQuotedOption`,
+    `parseLaneId` via the dispatcher) is the surface most likely to break
+    with each new subcommand.
+26. **`CLAUDE.md` is a symlink to `AGENTS.md`.** Fine for Claude Code
+    consumers, but pi convention is `AGENTS.md` only. Worth a one-liner in
+    `AGENTS.md` clarifying which doc is canonical.
+
+### J. What the workflow gets right
+
+For balance — these are the parts that read clean on a first pass:
+
+- **The non-negotiables in `AGENTS.md`** (commit per logical unit, no
+  `git add .`, where files live) are short and enforceable.
+- **The append-only `results.jsonl` + overwrite `state.json` split** is a
+  clean separation of "ground truth history" vs "resume snapshot", and
+  `reconstructState` (`state.ts:126-166`) is small and easy to audit.
+- **`MAD + threshold * mad`** in `isImprovement` (`metrics.ts:79-95`) is
+  a simple, defensible significance gate that handles GPU jitter.
+- **The `activeIteration` phase machine** (`started` → `measured` →
+  cleared on decide/log) plus the decide-action mismatch guard
+  (`index.ts:919-950`) is the right shape for "you can't keep what you
+  haven't verified".
+- **The startup resume notice with theme-aware coloring** is a nice
+  passive-but-discoverable surface; not auto-attaching loops on session
+  start is the right default.
+
+## Section 2 — Contrast With Iteration History (2026-05-07)
+
+After writing Section 1, I read `git log` from the scaffold (`72ecc86`) up
+through the most recent feature (`151493b feat: add guided loop setup`) to
+see how the project actually got here. Several Section 1 items read very
+differently with that history in hand: some are old design choices the team
+already debated and resolved, some are gaps that successive fixes deepened
+rather than closed, and a few are problems the iteration arc itself created.
+
+The repo is ~5 calendar days old. The arc has three rough phases:
+
+- **2026-05-03 — scaffold + 0.1.x stabilization.** Initial extension lands
+  (`9c23856`), then a long same-day burst of fixes: rename tools/commands
+  from `autoloop_*` → `multiloop_*` (`94da6fe`), consolidate state into
+  `.multiloop/` (`2f9ff1d`), fold separate `/multiloop-status` and
+  `/multiloop-archive` commands into `/multiloop` subcommands (`1143e7e`),
+  drop the original setup wizard skill in favour of help text for bare
+  `/multiloop` (`0dc424a`), then a row of small correctness fixes through
+  `3dceac7`.
+- **2026-05-06 — compaction & resume saga.** Three successive fixes
+  (`5c40bca` → `b4603b0` → `426da38`) and a 362-line design doc
+  (`d733049 docs/STATE.md`). The default flips from "auto-attach registry
+  loops on session_start" to "explicit `/multiloop resume` required", with a
+  passive notice (`1afcbf7`) replacing the silent attachment. Widget polish
+  follows.
+- **2026-05-07 — v0.2 features.** Mechanical auto-continuation
+  (`d8e46fb`), compound verification checks (`2721e0b`), guided loop setup
+  with the new `multiloop_start` tool (`151493b`).
+
+### What the history changes about Section 1
+
+**The complexity of `loopTurnActive` (Section 1 / G) is the answer, not the
+problem.** `d8e46fb fix: mechanically continue active loops` exists
+specifically because, before that commit, the agent would record one
+`multiloop_decide` and then summarize and stop. Auto-continuation, the
+ownership flag, and the `shouldContinueAfterUserInput` regex are the price
+of fixing that. So my initial framing was off: the heuristic isn't bloat,
+it's load-bearing. The fair concern is narrower — that the regex is
+keyword-restricted and the only graceful "stop here for a moment" path is
+an explicit `/multiloop pause`. That refinement is real but smaller than
+"this code is intricate."
+
+**The three-doc duplication (Section 1 / E) is one day old, not legacy
+drift.** `skills/multiloop/skill.md` and `extensions/pi-multiloop/index.ts`
+have been in step for most of the repo's life. `docs/LOOP_GUIDE.md` was
+introduced *in the same commit* as the guide flow (`151493b`, today), and
+that commit also rewrote `buildSetupGuidePrompt`. So the three sources of
+truth started as one feature ship and haven't been reconciled yet — the fix
+is a same-week followup rather than a longstanding tech-debt project.
+
+**The "TUI dashboard" gap (Section 1 / A1) has been dead code since the
+scaffold.** `ui.ts` was committed in `9c23856` (the first feature commit)
+with the full table renderer, and nothing has imported it in the four days
+since. Same story for the punchlist parser in `modes.ts` (Section 1 / D11).
+This is the strongest "open promise" in the repo — both files have been
+sitting unused through every refactor. Either they should be wired in or
+deleted. The README/PLAN copy that mentions them should match whichever
+choice wins.
+
+**Auto-attach-on-startup was already debated and reversed.** Commit
+`426da38 fix: require explicit multiloop resume` deliberately removed
+`getActiveLoops()` from `session_start` and added an explicit follow-up
+prompt path. The follow-on `1afcbf7 feat: show resumable multiloops on
+startup` then added the passive notice. So "loop becomes active in memory
+only after `/multiloop resume`" is intentional and recent — the README
+copy I flagged as worth surfacing already reflects the new default. Good;
+no change needed.
+
+**Compaction-aware resume went through three iterations to land.**
+`5c40bca` → `b4603b0` → `426da38`, all named "fix" rather than "feat".
+`d733049 docs/STATE.md` reads as the after-action analysis of those three
+fixes. The honest acknowledgement in STATE.md that the *real* fix is an
+upstream Pi API change exposing `CompactionReason` is the right framing,
+and means Section 1 / G18's concerns are bounded by an external
+constraint that the team has already named. That's a different texture
+than "this is just heuristic mush" — it's "we're working within the API
+we have."
+
+**`multiloop_start` is one commit old.** `151493b` added it; before that,
+all loops were started through the inline `/multiloop <goal>` parser in
+the command handler. Section 1 / B's complaints about the inline parser
+(`extractQuotedOption` only handles backticks/double quotes; default lane
+= mode name) are now legacy paths — the canonical path is the guide flow
+calling `multiloop_start` with structured params. The inline form is
+still reachable, so the foot-guns are real, but they sit on the
+deprecation slope, not the active surface.
+
+**Status-enum drift (Section 1 / H19) is in `docs/TODO.md` already.** The
+team has acknowledged it; I'm restating it. Worth keeping in feedback as a
+user-facing concern, but not a discovery.
+
+### Things that look worse with history visible
+
+**The version/CHANGELOG drift was a deliberate choice, not an oversight.**
+`ad56481 chore: bump version to v0.2.0` landed on 2026-05-07 02:18 JST.
+`d8e46fb`, `2721e0b`, and `151493b` (the three big v0.2 features) all
+landed *the same day*, between 20:57 and 22:11 JST — i.e. ~18 hours after
+the version bump. Either the bump was premature, or these features were
+expected before publish but slipped after. CHANGELOG `## Unreleased`
+preserves the intent, but `package.json` is "0.2.0", `pi install
+npm:pi-multiloop` will give 0.2.0 without these features, and
+README/skill copy describes them as live. A `0.2.1` (or `0.3.0`) cut
+should happen before the README is accurate.
+
+**The `lane` vs `lane/run-tag` argument inconsistency (Section 1 / B5)
+was introduced by the consolidation.** `1143e7e refactor: consolidate all
+commands under /multiloop subcommands` flattened separately-shaped
+commands (`/multiloop-status`, `/multiloop-archive`) into one parser. The
+parser preserved each command's old arg shape rather than picking one. So
+the inconsistency isn't ambient — it's specifically the residue of the
+consolidation, and a single `parseLaneTarget(arg, { allowLaneOnly:
+true })` helper would let `pause` / `stop` / `resume` / `archive` / `rm`
+all converge.
+
+**The `multiloop_decide` strict-equality guard (Section 1 / F15) was
+added with the compound-verifier feature.** `2721e0b` added both the
+`activeIteration.recommendedAction` machinery and the `sameMeasurements`
+check. The intent is "you can't decide differently than what your
+verification said," which is correct, but it landed without a documented
+recovery flow. The error message tells the agent to re-measure, but the
+README does not, and `skill.md` doesn't either. This is a fresh
+documentation gap.
+
+### The one big shift from Section 1
+
+If I had to pick a single revision: **Section 1 underweighted the
+"correctness ratchet" arc.** The notable trend across the iteration
+history is each fix tightening *what counts as a real loop step*:
+
+- registry-only loops can be stopped/paused (`cd128cd`),
+- formatDelta no longer divides by zero (`d857c1d`),
+- `archived` is a real status (`3dceac7`),
+- `multiloop_decide` won't accept stale or unrecorded measurements
+  (`2721e0b`),
+- omitted-but-configured guards are now synthetic-failed checks
+  (`2721e0b`),
+- the loop won't stop after one decide (`d8e46fb`),
+- session-start no longer silently attaches detached loops (`426da38`).
+
+That is a clean ratchet pattern and it's the most distinctive thing
+about the project. Section 1 read like "here are the rough edges"
+without naming the strategy that produced them. The rough edges are
+tradeoffs the ratchet pays for: stricter contracts → more friction
+when an agent goes off-script → more documentation needed at exactly the
+seams (mismatch errors, synthetic-failed checks, auto-continue policy)
+where the ratchet is locking. The single highest-leverage doc fix is to
+add a "When the loop tells you no" section that names every place the
+engine refuses an action, why, and what to do — that's the surface
+where the ratchet meets the user.
+
+## Section 3 — Reading codex-autoresearch For Adoption (2026-05-07)
+
+`~/codex-autoresearch/` is an autoresearch skill for Codex CLI
+by `leo-lilinxiao`. Same problem
+domain as pi-multiloop, very different architecture: skill + Python helper
+scripts driving Codex through a TSV/JSON state contract, vs. extension +
+typed pi tools driving the agent through a tighter API. The README in
+pi-multiloop already cites it as a sibling project. Reading it side by side
+makes the design tradeoffs visible.
+
+The goal of this section is *not* "import its features." The two systems
+have already diverged on first principles (single worktree vs.
+multi-worktree, typed tools vs. helper scripts, JSONL vs. TSV) and many
+choices that look like missing features are deliberate north-star
+preservation. The goal is to flag the half-dozen places where adopting an
+idea is cheap, additive, and consistent with pi-multiloop's stated stance.
+
+### What codex-autoresearch does that pi-multiloop should consider
+
+These are roughly ranked by adoption ROI: cost vs. fit with pi-multiloop's
+north stars.
+
+1. **Atomic state writes (high ROI, ~10 lines).**
+   `references/session-resume-protocol.md` line 68: "Write protocol: write
+   to a uniquely named temporary file in the same directory, fsync, then
+   rename to `autoresearch-state.json` (atomic)." pi-multiloop's `saveState`
+   uses `writeFileSync` directly (`state.ts:114-118`). A crash mid-write
+   today produces a partial JSON file that fails `JSON.parse` on resume.
+   Atomic temp+rename costs one helper and would harden every state save.
+
+2. **Richer state counters (high ROI, easy schema bump).**
+   codex-autoresearch's JSON state breaks out `keeps`, `discards`,
+   `crashes`, `no_ops`, `blocked`, `consecutive_discards`, `pivot_count`,
+   `last_status` (`session-resume-protocol.md:46-54`). Pi-multiloop's
+   `LoopState` (`state.ts:46-69`) only carries `iteration`,
+   `consecutiveFailures`, and `pivotCount` — a `keep` and a `revert` in
+   the same iteration count are indistinguishable from the snapshot
+   without replaying `results.jsonl`. Adding `keeps`, `reverts`, `logs`,
+   `lastAction`, and `lastUpdatedAction` to the snapshot makes
+   `/multiloop status` and the dashboard much more informative for free.
+
+3. **Resume helper returns a typed decision (medium ROI, design
+   improvement).**
+   `autoresearch_resume_check.py` returns one of
+   `full_resume | mini_wizard | tsv_fallback | fresh_start`
+   (`session-resume-protocol.md:106-122`), and the resume prompt acts on
+   that decision. Pi-multiloop's `reconstructState`
+   (`state.ts:126-166`) silently best-efforts; mismatches between
+   `state.json` and `results.jsonl` get papered over (a stale
+   `activeIteration` is just dropped). Adopting "the resume helper
+   classifies the resume situation and the prompt acts on the
+   classification" would let pi-multiloop differentiate
+   "clean resume" from "JSON drift, ask the agent to reconcile" from
+   "no JSON, reconstruct from JSONL" — three meaningfully different
+   prompts today collapsed into one.
+
+4. **Structured lessons schema with capacity management (medium ROI,
+   directly fits pi-multiloop's stated cross-run-learning goal).**
+   `references/lessons-protocol.md` defines a per-entry schema
+   (Strategy / Outcome / Insight / Context / Iteration / Timestamp), a
+   50-entry archive target with family compaction, and time-decay
+   weighting (14d / 30d). Pi-multiloop's `appendLesson`
+   (`state.ts:168-178`) is a free-form one-liner: `- [timestamp]
+   message`. The README and PLAN list "Cross-run learning" as a feature,
+   but with no schema there is no way for the agent to pattern-match
+   prior insights during ideation. Adopting the schema (even without
+   compaction) would convert `lessons.md` from a journal into a queryable
+   bias source.
+
+5. **A `crash` / `no-op` / `blocked` / `drift` action vocabulary (medium
+   ROI, two-line schema change).**
+   `references/results-logging.md:84-96` enumerates ten status values
+   covering verification crashes, empty diffs, hard blockers, and
+   metric drift. Pi-multiloop has four (`keep | revert | log | skip`).
+   When `multiloop_measure` errors out today, the agent has to choose
+   between calling `multiloop_decide action="revert"` (which will be
+   rejected since no measured iteration is pending) and just abandoning
+   the iteration. A `crash` action would let the engine record what
+   actually happened without forcing a phantom revert.
+
+6. **Web-search escalation between pivot-exhausted and stop (medium ROI,
+   one new escalation level).**
+   `references/pivot-protocol.md:43-66` adds Level 3 (web search after 2
+   PIVOTs) and Level 4 (soft-blocker handoff after 3 PIVOTs). Pi-multiloop
+   stops at `MAX_PIVOTS = 2` and exits (`loop.ts:99-105`). Pi already
+   exposes WebFetch/WebSearch to the agent, so adding one more rung —
+   "after `MAX_PIVOTS`, prompt the agent to do a targeted web search once
+   before stopping" — is a free productivity gain at exactly the moment
+   the loop is otherwise giving up. Keep the current escalation table
+   (`docs/TODO.md` mentions structural success labels but not this).
+
+7. **Layered skill loading (medium ROI, doc reorg).**
+   `SKILL.md` lines 14-23 instruct the agent to load only the references
+   that match the current situation: load `runtime-hard-invariants.md`
+   only for active execution modes; load `session-resume-protocol.md`
+   only when resuming; load `interaction-wizard.md` only at launch. Pi-
+   multiloop's `skills/multiloop/skill.md` is one self-contained file. The
+   layered approach keeps context budget small for short tasks and
+   detailed for stuck-deep tasks. Pi-multiloop already has the underlying
+   docs (`LOOP_GUIDE.md`, `STATE.md`); the skill just doesn't tell the
+   agent when to load them.
+
+8. **The "two-phase boundary" name (low cost, high clarity).**
+   codex-autoresearch's wizard repeatedly cites "two-phase boundary: all
+   questions before launch, no questions after" (e.g.,
+   `interaction-wizard.md:11`, `loop-workflow.md:13`,
+   `pivot-protocol.md` integration). Pi-multiloop's docs imply the same
+   rule but without a name. Naming it makes "you've already crossed the
+   boundary, don't ask" something the agent can assert instead of
+   having to deduce. The skill's Runtime Hard Rule 6 is exactly the
+   right place to lift this name in.
+
+9. **Multiple-choice over open-ended clarifications (low cost, doc note).**
+   `interaction-wizard.md:51` makes MC the default question shape. Pi-
+   multiloop's `LOOP_GUIDE.md` says "Ask concrete questions with suggested
+   defaults rather than open-ended forms" — same intent, weaker push.
+   Tightening the language to "prefer A/B/C choices over free-form" gets
+   shorter setup turns.
+
+10. **Health-check preflight (low ROI for v0.2; worth a v0.3 stub).**
+    `references/health-check-protocol.md` runs disk-space / verify-exists
+    / git-state / log-integrity checks before each detached relaunch.
+    Pi-multiloop is foreground-only today, so the relaunch boundary
+    doesn't exist; but a "first-iteration preflight" that checks the
+    verify command resolves and the lane dir is writable would catch the
+    "verify command typo" failure mode without making the user wait for
+    a full iteration to discover it.
+
+### What pi-multiloop should NOT adopt
+
+These are codex-autoresearch features that look attractive but cut
+against pi-multiloop's stated north stars. Better to leave them alone:
+
+- **Background/detached runtime (`autoresearch_runtime_ctl.py launch`).**
+  Pi-multiloop's PLAN explicitly defers background mode to "v0.2"
+  (`docs/PLAN.md:52`) and currently scopes it as "in-process". The detached
+  runtime in codex-autoresearch is a major subsystem (manifest, supervisor,
+  hooks, exec policy). The pi extension event surface can already drive
+  long-running attended loops; a detached runtime competes with `pi`
+  itself rather than composing with it.
+
+- **Parallel experiments via worktrees.**
+  `references/parallel-experiments-protocol.md` runs up to 3 hypotheses in
+  parallel git worktrees with subagent workers. Pi-multiloop's whole
+  pitch is "lane isolation on the *same* worktree." Parallel-via-worktree
+  would re-introduce exactly the merge pain `docs/PLAN.md:7` cites as the
+  reason multi-loop exists. If parallelism becomes interesting later, it
+  should be parallel *lanes* on one worktree, not parallel worktrees.
+
+- **Multi-repo (primary + companion repos).**
+  `session-resume-protocol.md:74-76` and the launch manifest carry
+  `config.repos` with role tags. This belongs in a higher-level
+  orchestrator (pi-teams, pi-messenger). Pi-multiloop scopes itself to
+  one worktree by design.
+
+- **Helper-script architecture.**
+  codex-autoresearch's `autoresearch_record_iteration.py`,
+  `autoresearch_init_run.py`, `autoresearch_resume_check.py`, etc. exist
+  because Codex skills can't expose typed tools the way pi extensions can.
+  Pi-multiloop already has typed `multiloop_*` tools with parameter
+  schemas. The helper-script indirection would be a regression.
+
+- **TSV log format.**
+  `research-results.tsv` is fine for fixed columns, but pi-multiloop's
+  v0.2 verification checks (`checks: VerificationCheck[]` in
+  `state.ts:14-29`) would be ugly to flatten into TSV. JSONL is the
+  right choice for arbitrary nested check arrays.
+
+- **Structured `required_keep_labels` / `required_stop_labels`.**
+  These look powerful (`results-logging.md:58-79`), but pi-multiloop's
+  compound verifiers already cover the same use case via mechanical/prompt
+  checks. Adding labels alongside checks would be two ways to express the
+  same constraint.
+
+- **Internationalized README.**
+  Premature for a 5-day-old project with one named user.
+
+### Surprising things codex-autoresearch reads as right
+
+These are stylistic moves I noticed reading the docs side by side, not
+features:
+
+- **The same invariant is repeated in four places**
+  ("log every completed experiment before the next one starts" appears in
+  `runtime-hard-invariants.md`, `loop-workflow.md`,
+  `interaction-wizard.md`, and `SKILL.md` Hard Rule 14). This looks
+  redundant on first read; on second read it's the most-violated
+  invariant restated everywhere it could be ignored. Pi-multiloop has the
+  equivalent rule (decide/log between iterations) and states it once. The
+  pattern is worth copying for the *one* rule that gets violated most
+  often — Section 1 / G's auto-continue rule, probably.
+
+- **The wizard is allowed to refuse "go" if the summary isn't shown.**
+  `interaction-wizard.md:22-23`: "The mandatory confirmation round must
+  never collapse into a bare 'foreground/background + go' prompt." Pi-
+  multiloop's setup guide doesn't explicitly forbid the agent from
+  bypassing the summary if the user is impatient.
+
+- **Docstrings name the *call site*, not just the contract.**
+  e.g. `autoresearch_record_iteration.py` is not just "appends a row";
+  the docstring tells the agent *which workflow phase* should call it.
+  Pi-multiloop's `multiloop_iterate`/`measure`/`decide` descriptions
+  describe the operation but not the phase. Adding "Call this *between*
+  iterations, before any file edits" to `multiloop_iterate.description`
+  would make the order self-documenting in the tool list.
+
+### One concrete adoption package for pi-multiloop v0.2.x
+
+If I had to pick the smallest set that's clearly worth doing now, before
+the next npm publish:
+
+1. Atomic `saveState` (item 1).
+2. Schema-bump `LoopState` to add `keeps`, `reverts`, `logs`,
+   `lastAction` counters; surface them in `/multiloop status` and the
+   dashboard rows (item 2).
+3. Convert `appendLesson` to write the structured 6-field schema; leave
+   the file format as `lessons.md` markdown but standardize the entry
+   shape (item 4).
+4. Add `crash` and `blocked` to the action union; `multiloop_decide`
+   accepts them and `appendResult` records them (item 5).
+5. Lift "two-phase boundary" as a named term in skill / LOOP_GUIDE /
+   `buildSetupGuidePrompt` (item 8).
+6. Add a "phase hint" sentence to each `multiloop_*` tool description
+   so the order is discoverable from the tool list alone (last bullet).
+
+That's a single PR's worth of work, fully consistent with the existing
+north stars, and it directly addresses the "the engine refuses an
+action and the agent doesn't know why" surface flagged in Section 2.
+
+## Section 4 — Concrete Cleanup: Intent-First, LLM-Routed Commands
+
+The user request that prompted this section: **bare `/multiloop` should
+show state and offer next moves, freeform input should drive a real
+compound-verifier setup pass, and bad parses should hand off to the LLM
+rather than erroring**. Those three asks are the same design pattern
+applied at three different surfaces — let it sit on top first, then enumerate
+the changes.
+
+### The pattern: intent in, typed call out
+
+Today the `/multiloop` command handler (`index.ts:1207-1432`) is a strict
+parser: each subcommand has a fixed argument shape (`lane/run-tag`,
+`lane`, or none), bad input → `ctx.ui.notify(..., "error")`, and the only
+LLM-driven path is the bare-empty case (which jumps straight to
+`buildSetupGuidePrompt`). That mirrors the wrong half of the system —
+`multiloop_iterate` / `_measure` / `_decide` / `_log` are typed *agent*
+calls, but the *human* surface is also typed and brittle.
+
+The user pattern (used in realitycheck, outline-edit, shisad-dev) is:
+the human types intent, the slash command captures it as a follow-up
+prompt with the surrounding state attached, and the LLM constructs the
+syntactically correct tool call. The command handler's job is to
+**collect intent + relevant context**, not to **parse arguments**. It
+only short-circuits when the input is unambiguous and zero-cost (e.g.,
+`/multiloop status` is a pure render with no LLM round-trip needed).
+
+For this to work, every "human op" (resume, pause, stop, archive, rm,
+new loop) needs (a) a typed tool the LLM can call and (b) a fallback
+path in the slash handler that emits a follow-up prompt rather than an
+error. Today only `multiloop_start` exists; pause/stop/resume/archive/rm
+are slash-only, so even when the LLM knows what the user means, it has
+no typed call to make.
+
+### Cleanup item 4.1 — Bare `/multiloop` becomes status-first
+
+**Symptom.** `index.ts:1364-1367`: `if (!trimmed || trimmed === "guide"
+|| ...)` jumps to the setup guide. A returning user with three active
+loops who types `/multiloop` to "see what's going on" gets a "let's
+design a new loop" prompt — the wrong default. The "available to
+resume" notice only fires on `session_start`, not on `/multiloop`.
+
+**Change.** Make bare `/multiloop` a unified state-first view that
+always shows what exists and routes the next action:
+
+- registry empty → short helper text + "Describe what you want to
+  optimize, build, research, or work through. I'll scan the repo and
+  propose a loop." This is the only path that goes straight to the
+  setup guide.
+- attached loops exist → show them first (active, descending by
+  `state.lastUpdated`), then show registry-active-but-detached loops
+  (resumable), then a one-line archive summary
+  (`12 archived, last: perf/run-... 2 days ago`). End with a
+  next-actions hint: "Continue active, resume <name>, start new
+  (describe), pause/stop/archive [name], or `/multiloop help`."
+- registry has only completed/paused loops → similar shape but lead
+  with "no active loops" and the resumable list.
+
+**Implementation sketch.**
+
+- Add `loopSummary` ordering: sort registry by
+  `state.lastUpdated ?? entry.startedAt` desc (loaded once per call).
+- Split into three buckets: `attached` (in `activeStates`),
+  `resumable` (registry `active`, not attached), `inactive`
+  (`paused | completed`). Render each bucket in its own block.
+- Archive summary: count entries with `status === "archived"` plus the
+  most recent one — no per-archive detail. If the user wants detail,
+  they call `/multiloop ls --archived` (new flag).
+- Re-use the renderer in `colorizeResumableLoopsNotice`'s style for
+  consistency with the startup notice.
+- After rendering, if the user wants to take action on something they
+  saw, the *next* user message goes to the LLM, which can call
+  `multiloop_resume` / `_pause` / `_stop` / `_archive` / `_rm` /
+  `_start` (new tools — see 4.4) without further parsing.
+
+### Cleanup item 4.2 — `/multiloop ls` becomes reverse-chronological with archive collapse
+
+**Symptom.** `index.ts:1315-1331` walks the registry in insertion order
+and renders every entry equally — including archived ones, which
+quickly drown the active-loop signal in noise.
+
+**Change.**
+
+- Sort by `state.lastUpdated ?? entry.startedAt` descending.
+- Group: `[active]`, `[paused]`, `[completed]`, then a single
+  `[archived: N — last <id> @ <ts>]` line.
+- Add `/multiloop ls --archived` (or `/multiloop ls all`) to expand the
+  archive into full rows.
+- Empty case: don't `ctx.ui.notify("No loops registered.")`; render the
+  same status-first frame bare `/multiloop` uses, so `ls` and bare
+  match instead of diverging on the empty case.
+
+This also fixes the inconsistency Section 1 / B5 flagged: `ls` becomes
+the single canonical "what's here" view, with `status` as the active-
+focus subset.
+
+### Cleanup item 4.3 — Freeform input always goes through the guide
+
+**Symptom.** `index.ts:1404-1432` — when input doesn't match any
+subcommand, `extractQuotedOption` regex-mines `verify:` / `guard:` /
+`prompt verifier:` / `acceptance:`, defaults missing fields, and calls
+`startLoop` directly with whatever it found. This bypasses the guide
+entirely. Real prompts are not "verify: \`foo\`, guard: \`bar\`" —
+they're "go through `docs/TODO.md` but make sure tests pass and decode
+throughput keeps going up". The current parser captures none of that.
+
+**Change.** Treat *every* freeform input as a goal description for the
+guide flow. Replace the inline-parser path with:
+
+1. Capture the raw text as the `goal` payload.
+2. Send `buildSetupGuidePrompt()` as a follow-up, with the user's
+   freeform text appended as the goal seed:
+   `Help me create a high-quality pi-multiloop run. The user said:
+   "<raw text>". Scan the repo, propose a compound config, and
+   confirm.`
+3. The guide flow already calls `multiloop_start` after explicit
+   approval — so the existing tool surface is unchanged; only the
+   command handler's branching changes.
+
+The regex parser (`extractQuotedOption`) becomes dead code. Delete it
+and the `extractQuotedOption(trimmed, ["verify"])` block in the slash
+handler.
+
+**Why this is correct for compound goals.** The user's example —
+"go through this punchlist but also keep these numbers going up, run
+these ablations or do this sweep but also track the loss and gradient
+norms for health" — is exactly what the guide flow's compound-verifier
+proposal step is designed for (`docs/LOOP_GUIDE.md:46-57`). Forcing
+*all* inline input through that step means agents stop trying to map
+multi-modal goals onto a single regex-matched `verify:` and start
+building real `verify` + `guard` + `prompt verifier` + `checks`
+combinations. This is the largest single quality lift available
+without writing new engine code.
+
+### Cleanup item 4.4 — Add typed tools for human ops
+
+**Symptom.** Pause/stop/resume/archive/rm are slash-only. When the LLM
+disambiguates `/multiloop resume perf` (one-of-three runs in lane
+`perf`), it has no way to *call* the right resume operation — it has
+to print "please run `/multiloop resume perf/run-20260507-220838`" and
+hope the user copies it.
+
+**Change.** Add tools mirroring the existing `multiloop_start`:
+
+- `multiloop_resume({ lane, runTag })`
+- `multiloop_pause({ lane?, runTag? })`
+- `multiloop_stop({ lane?, runTag? })`
+- `multiloop_archive({ lane?, runTag? })` (omit both → archive all
+  eligible)
+- `multiloop_rm({ lane, runTag })` (always strict — destructive)
+
+Each tool is a thin wrapper over the existing slash-command logic —
+the underlying state mutations already exist, this just exposes them
+to the LLM with a typed schema. With these in place, the slash
+handler's job for ambiguous input becomes: emit a follow-up prompt
+with the registry snapshot and the user's raw words, and let the LLM
+pick the right tool.
+
+### Cleanup item 4.5 — Slash arg parse failure → LLM hand-off, not error
+
+**Symptom.** `index.ts:1213` (resume), `index.ts:1347` (rm), implicit
+in archive — `parseLaneId` returns null for any non-`lane/run-tag`
+input and the handler `ctx.ui.notify(..., "error")`s. There is no
+fallback. `/multiloop resume perf` (lane only), `/multiloop resume the
+kernel one` (natural language), `/multiloop resume yesterday`
+(temporal) all hit the wall.
+
+**Change.** Replace the error path with an LLM hand-off:
+
+```
+On parse failure for resume/pause/stop/archive/rm:
+  1. Build a "disambiguate" follow-up prompt that includes:
+     - the user's raw input,
+     - the full registry snapshot (lanes, run-tags, status,
+       startedAt, lastUpdated, current/best metric),
+     - the available typed tools (multiloop_resume, _pause, etc.),
+     - the rule: "If the user's input matches exactly one loop,
+       call the appropriate tool. If it matches none or several,
+       ask the user to choose."
+  2. Send via pi.sendUserMessage(prompt, { deliverAs: "followUp" }).
+  3. markLoopTurn("disambiguate") so auto-continue does not fire
+     until the LLM resolves the ambiguity.
+```
+
+The strict path stays for `lane/run-tag` exact matches — those skip
+the LLM round-trip and act immediately. Everything else delegates.
+This is the realitycheck/outline-edit/shisad-dev pattern applied to
+the loop control surface.
+
+**Bonus: pluralize gracefully.** `/multiloop pause` (no arg) today
+pauses every active lane in one shot. Under the LLM-route, that
+becomes "the user said `pause`, there are 3 active loops, ask them
+which" by default — and the slash handler can keep the
+`pause-everything` shortcut behind an explicit `pause --all` flag.
+
+### Cleanup item 4.6 — Unify `archive` argument shape
+
+While touching the dispatch table, fix Section 1 / B5: archive
+currently accepts `archive` (= archive-all) or `archive <lane/run-tag>`
+(= one loop), but `archive someLane` errors. Under 4.5, that error
+case becomes an LLM hand-off automatically — no new code needed,
+just remove the explicit error branch.
+
+### Implementation order (single PR-sized chunks)
+
+1. **PR A — typed tools for human ops (item 4.4).** Lowest risk,
+   purely additive. Existing slash handlers stay; tools call the same
+   internal helpers. Adds ~80 lines and a `tests/index.test.ts` block
+   per tool.
+2. **PR B — bare `/multiloop` and `ls` reorganization (items 4.1, 4.2).**
+   Renderer changes only; no new persistence. Add `--archived` flag.
+   Update README + skill to document the new defaults.
+3. **PR C — freeform → guide flow (item 4.3).** Delete
+   `extractQuotedOption` and the inline `startLoop` call. The guide
+   flow then handles everything that isn't a known subcommand. Update
+   `index.test.ts` to cover the seed-prompt shape.
+4. **PR D — LLM hand-off on parse failure (items 4.5, 4.6).** Depends
+   on PR A (tools must exist for the LLM to call). Replace the four
+   `parseLaneId` error paths with disambiguation follow-ups.
+5. **PR E — doc unification.** Update `skills/multiloop/skill.md` and
+   `docs/LOOP_GUIDE.md` to describe the new default behaviors. Cite
+   the "intent-first, typed-call-out" pattern by name so future
+   commands inherit it.
+
+The total surface area is roughly the same as the v0.2 ratchet
+described in Section 2 — same single-PR-per-chunk discipline. The
+key shift is moving the strictness *inward*: the engine still refuses
+malformed measurements / decisions / acceptance verdicts, but the
+human surface goes the other way and treats parse failure as a
+prompt-for-the-LLM, not a stop sign.
+
+### Why this is consistent with the north stars
+
+- **"Use existing benchmark scripts"** (`docs/PLAN.md:13`) — unchanged.
+  The guide flow already proposes verify/guard/prompt verifier from
+  what's in the repo; routing all input through it strengthens that.
+- **"Steerability"** (`docs/PLAN.md:19`) — strictly improved. Today the
+  user must speak the parser's grammar; under 4.5 the LLM speaks the
+  user's natural phrasing back into typed calls.
+- **"Minimal state files"** (`docs/PLAN.md:21`) — unchanged. No new
+  state, just new tools and renderers.
+- **"Two-phase boundary"** (Section 3, item 8) — *strengthened*. The
+  guide owns Phase 1 (setup) consistently for every input shape, not
+  just bare `/multiloop`.
+
+### What this section does *not* propose
+
+- It doesn't auto-attach loops on `session_start` — Section 2 covered
+  that; the explicit-resume default stays.
+- It doesn't move per-iteration behaviors (multiloop_iterate / measure
+  / decide) to LLM-routed dispatch. Those are the strict ratchet and
+  should remain typed.
+- It doesn't introduce a "natural-language tool call" layer for
+  *anything*; only the human-facing slash surface delegates. The
+  agent-facing tool surface stays JSON-schemed.
+
+## Section 5 — Unified Cleanup Roadmap
+
+A second reviewer (GPT-5.5) read Sections 1-4 and proposed a
+different *batching* for the same items: smaller batches grouped by
+risk surface, with a clear publish gate. Their batching is better than
+the per-section "single PR" sketches in Sections 2-4 because it
+sequences the user-facing surprises before the architectural shifts and
+names the publish gate explicitly. This section reconciles the two
+proposals into a single ordered roadmap.
+
+### The four batches (with Section 4's items folded in)
+
+#### Batch 1 — Pre-publish surface cleanup
+
+Pure documentation + render fixes, no behavior change. Anchors the
+README to reality before the next npm push.
+
+- [ ] **Decide release target.** Compound verifiers (`2721e0b`),
+  mechanical continuation (`d8e46fb`), and guided setup (`151493b`) all
+  landed after the `0.2.0` bump (`ad56481`). Cut **0.3.0** when
+  Batches 1-2 + the atomic-state slice of Batch 3 are merged.
+  (Section 2 / "Things that look worse with history visible".)
+- [ ] **Update `docs/PLAN.md` checklist.** All 12 items in
+  `docs/PLAN.md:55-67` are checked off in code; mark them done so new
+  contributors don't read the project as unbuilt. (Section 1 / A4.)
+- [ ] **Wire the TUI dashboard or soften the README copy.** Either
+  call `formatDashboardText` from `/multiloop status` (preferred) or
+  drop "TUI dashboard" from `README.md:24` and `docs/PLAN.md` and
+  delete `ui.ts`. Don't leave dead code claimed as a feature.
+  (Section 1 / A1, Section 2.)
+- [ ] **Link `docs/STATE.md` and `docs/LOOP_GUIDE.md` from the README.**
+  Both are excellent and currently invisible. Add them to the README's
+  "How State Works" / "Setup" sections. (Section 1 / I23.)
+
+#### Batch 2 — Command / UX cleanup
+
+The most user-visible improvements. Lands the intent-first surface
+from Section 4 plus the inline-parser fixes 5.5 named.
+
+- [ ] **One target resolver for lane vs lane/run-tag.** Add
+  `parseLaneTarget(arg, { allowLaneOnly: true })` returning
+  `{ kind: "exact", id } | { kind: "lane", lane } | { kind: "ambiguous", input }`.
+  Use it in every subcommand. (Section 1 / B5; Section 4.5/4.6.)
+- [ ] **Lane-only resume / archive / pause when unambiguous.** When
+  `parseLaneTarget` returns `kind: "lane"` and exactly one matching
+  loop exists, act on it. (Section 1 / B6.) Keep `rm` strict — it's
+  destructive.
+- [ ] **Bare `/multiloop` becomes status-first.** Three buckets
+  (attached / resumable / inactive), descending by `lastUpdated`,
+  archive collapsed to a one-liner; only an empty registry routes
+  straight to the setup guide. (Section 4.1.)
+- [ ] **`/multiloop ls` reverse-chronological with archive collapse.**
+  Group by status; `--archived` flag expands. Empty case matches the
+  bare-`/multiloop` frame. (Section 4.2.)
+- [ ] **Fix the inline parser.** Three small repairs to keep it
+  working until Section 4.3 retires it:
+  - support single quotes in `extractQuotedOption`
+    (`index.ts:341-347`),
+  - strip parsed `verify:` / `guard:` / `prompt verifier:` / `acceptance:`
+    fragments from `goal: trimmed` before persisting
+    (`index.ts:1422`),
+  - default lane collision: when the inferred lane already has an
+    in-memory or registry-active loop, suffix with `-2`/`-3` or
+    force the guide path. (Section 1 / C8-C10.)
+- [ ] **Freeform input always goes through the guide.** Replace the
+  inline `startLoop` call with a guide follow-up that seeds the goal.
+  Delete `extractQuotedOption` once the guide path covers all
+  freeform input. Order this item *after* the inline-parser repairs
+  above so behavior is correct on the way to deletion. (Section 4.3.)
+- [ ] **Add typed tools for human ops.** `multiloop_resume`,
+  `_pause`, `_stop`, `_archive`, `_rm`. Thin wrappers over existing
+  internal helpers. (Section 4.4.) These are the prerequisite for the
+  next item.
+- [ ] **Slash arg-parse failure → LLM hand-off.** Replace the four
+  `ctx.ui.notify(..., "error")` paths with a disambiguation
+  follow-up that includes the registry snapshot and lets the LLM
+  call the right typed tool. (Section 4.5.)
+
+#### Batch 3 — Runtime hardening
+
+The first two items are the publish gate; the remaining two are the
+"the loop says no" surface that Section 2 named as the highest-leverage
+doc fix.
+
+- [ ] **Atomic `saveState`.** Write to temp + fsync + rename.
+  (Section 3 item 1; 5.5.)
+- [ ] **Snapshot counters.** Add `keeps`, `reverts`, `logs`,
+  `crashes`, `lastAction`, `lastUpdatedAction` to `LoopState`.
+  Surface in `/multiloop status`. (Section 3 item 2; 5.5.)
+- [ ] **`crash` / `blocked` result actions.** Extend
+  `IterationResult.action`, the decide-tool union, and the
+  acceptance/recommendedAction paths. (Section 3 item 5; 5.5.)
+- [ ] **"When the loop tells you no" doc.** One section in
+  `docs/LOOP_GUIDE.md` (or a new `docs/RUNTIME_REFUSALS.md`)
+  enumerating every refusal: measurement mismatch, missing-but-configured
+  guard / prompt verifier (synthetic-failed check), no-active-loop,
+  measured-but-not-decided iteration, escalation-exhausted stop. For
+  each: trigger, why, recovery. (Section 2 closing paragraph; 5.5.)
+
+#### Batch 4 — Mode semantics
+
+Defer to after publish. Decisions, not large code.
+
+- [ ] **Punchlist as log/progress mode by default.** In
+  `assessAcceptance` (`verifiers.ts:83-91`), treat `mode === "punchlist"`
+  the same as `research`/`dev` — `recommendedAction: "log"` —
+  unless the user explicitly attaches a metric direction. Only switch
+  to keep/revert when a metric verify command was supplied alongside
+  the checklist. (Section 1 / D11-D13; 5.5.)
+- [ ] **Wire `parsePunchlist` or document agent-driven.** Either:
+  call `punchlistProgress` inside `multiloop_log` for `punchlist`
+  mode and stop on `done === total`; or delete the parser helpers
+  and document explicitly that punchlist is "agent reads the file,
+  agent checks items off." Don't leave both half-done. (Section 1 /
+  D11; 5.5.)
+- [ ] **Optional follow-ons (no commitment yet).** Structured
+  lessons schema (Section 3 item 4), web-search escalation rung
+  (Section 3 item 6), typed resume-decision (Section 3 item 3), tool
+  description "phase hints" (Section 3 closing).
+
+### Publish gate for v0.3.0
+
+The minimum bar before the next npm cut:
+
+1. Batch 1 complete (docs/version match reality).
+2. Batch 2 complete (the user-visible surface is the new shape).
+3. From Batch 3: atomic `saveState` + snapshot counters merged.
+4. CHANGELOG closed out: `## 0.3.0 - 2026-MM-DD` with the
+   compound-verifier / mechanical-continuation / guided-setup entries
+   plus the Batch 1-2 changes.
+5. README quick-start updated to reflect the new bare-`/multiloop`
+   default and the LLM-routed disambiguation behavior.
+
+The remaining Batch 3 items (`crash`/`blocked` actions, "when the
+loop says no" doc) and all of Batch 4 land in 0.3.x.
+
+### Why this batching and not Section 4's
+
+Section 4's "PR A → E" order put typed tools before the bare-
+`/multiloop` rework. 5.5's batching puts the visible surface fixes
+together (Batch 2 = command/UX) and the durability fixes together
+(Batch 3 = runtime). That groups by the *kind of risk* each batch
+carries: Batch 1 is doc-only (zero risk), Batch 2 changes what users
+see (UX risk, low architectural risk), Batch 3 changes what's on disk
+(durability risk, no UX surface). It also makes the publish gate
+crisp — finish the user-visible story plus atomic state, cut 0.3.0,
+keep iterating.
+
+The ordering within Batch 2 still respects Section 4's dependency:
+typed tools (4.4) ship before the LLM hand-off (4.5) that depends on
+them. The inline-parser repairs come *before* the freeform-to-guide
+change so the parser is correct on its way out. Otherwise the items
+are independent enough to land in any order within their batch.

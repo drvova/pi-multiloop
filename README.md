@@ -6,7 +6,7 @@ A multi-lane autoloop/autoresearch extension for [Pi](https://pi.dev) that lets 
 
 ## Why
 
-Other loop extensions only support one loop per session or worktree. If you're tuning a CUDA kernel and sweeping quantization parameters at the same time, those experiments touch different files but share the same build artifacts. pi-multiloop lets each loop have its own lane with independent state, so you don't need extra worktrees or branches.
+Most loop extensions run one loop per session. But real work rarely moves in a straight line — you might be cutting bundle size while also fixing flaky tests, or reducing latency while chipping away at a TODO list. Those tasks touch different files, so running them in parallel makes sense, but they share the same worktree and build artifacts. pi-multiloop gives each loop its own lane with independent state, so you can run several at once without extra branches or worktrees.
 
 ## Features
 

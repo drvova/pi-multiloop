@@ -1,3 +1,5 @@
+<p align="center"><img src="pi-logo-animated.svg" width="200" alt="pi-multiloop logo"></p>
+
 # pi-multiloop
 
 A multi-lane autoloop/autoresearch extension for [Pi](https://pi.dev) that lets you run multiple loops in the same worktree with isolated state per lane.

@@ -197,10 +197,16 @@ export function saveState(cwd: string, id: LaneId, state: LoopState): void {
 
     renameSync(tmpPath, finalPath);
 
-    dirFd = openSync(dir, "r");
-    fsyncSync(dirFd);
-    closeSync(dirFd);
-    dirFd = undefined;
+    // Crash-durability for the rename: fsync on a directory handle is a
+    // POSIX idiom. Windows rejects it (EPERM on open/fsync of a directory),
+    // and the rename itself already succeeded, so skip the directory fsync
+    // there entirely rather than failing after a durable write.
+    if (process.platform !== "win32") {
+      dirFd = openSync(dir, "r");
+      fsyncSync(dirFd);
+      closeSync(dirFd);
+      dirFd = undefined;
+    }
   } catch (err) {
     if (fileFd !== undefined) closeSync(fileFd);
     if (dirFd !== undefined) closeSync(dirFd);

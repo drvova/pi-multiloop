@@ -1735,6 +1735,7 @@ export default function (pi: ExtensionAPI) {
         recordModeDecision(ctx.cwd, false);
         loopTurnActive = false;
         loopTurnReason = undefined;
+        clearPendingContinue(runningStates(), ctx.cwd);
         const running = runningStates().length;
         ctx.ui.notify(
           running > 0

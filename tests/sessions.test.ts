@@ -17,6 +17,8 @@ import {
   createInitialState,
   saveState,
   loadState,
+  readResults,
+  stallStreak,
 } from "../extensions/pi-multiloop/state.js";
 import { applyLogIteration, establishBaseline } from "../extensions/pi-multiloop/loop.js";
 import { type LaneId, registerLoop, updateLoopStatus, ensureLaneDir } from "../extensions/pi-multiloop/lanes.js";
@@ -58,11 +60,62 @@ class Session {
       hasRunningLoopOnDisk: this.attached.size > 0,
       recordedDecision: latestModeDecision(this.branch, this.cwd),
     });
+    // Mirrors index.ts: an armed mode queues a continuation for the first
+    // turn; the durable flag is marked at queue time and cleared at delivery,
+    // so a later start re-arms via the owed branch only if nothing delivered.
     if (this.loopMode && this.runningCount() > 0) {
-      // Mirrors index.ts: queue the prompt, do not arm the turn flag.
-      this.continuations++;
+      this.queueContinuation("session-start");
+      return this;
+    }
+    const owed = this.owedCount();
+    if (owed.length > 0) {
+      this.queueContinuation(owed[0].reason);
     }
     return this;
+  }
+
+  /** Count attached running lanes still carrying a durable continuation intent. */
+  owedCount(): { reason: string }[] {
+    const owed: { reason: string }[] = [];
+    for (const key of this.attached) {
+      const [lane, runTag] = key.split("/");
+      const state = loadState(this.cwd, { lane, runTag });
+      if (state?.status === "running" && state.pendingContinue) owed.push(state.pendingContinue);
+    }
+    return owed;
+  }
+
+  /** queueLoopAutoContinue: mark the durable intent, count the queued follow-up. */
+  private queueContinuation(reason: string): void {
+    for (const key of this.attached) {
+      const [lane, runTag] = key.split("/");
+      const state = loadState(this.cwd, { lane, runTag });
+      if (state?.status !== "running") continue;
+      state.pendingContinue = { reason, queuedAt: new Date().toISOString() };
+      saveState(this.cwd, { lane, runTag }, state);
+    }
+    this.continuations++;
+  }
+
+  /** Simulate the follow-up send succeeding: delivery clears the flag. */
+  deliverContinuation(): this {
+    this.clearOwed();
+    return this;
+  }
+
+  /** Simulate process death between queue and delivery (flag already on disk). */
+  crashBeforeDelivery(): this {
+    return this;
+  }
+
+  private clearOwed(): void {
+    for (const key of this.attached) {
+      const [lane, runTag] = key.split("/");
+      const state = loadState(this.cwd, { lane, runTag });
+      if (!state?.pendingContinue) continue;
+      delete state.pendingContinue;
+      saveState(this.cwd, { lane, runTag }, state);
+    }
   }
 
   /** pi.on("input") for a non-extension message */
@@ -71,6 +124,7 @@ class Session {
       case "suspend":
         this.loopMode = false;
         this.loopTurnActive = false;
+        this.clearOwed();
         break;
       case "arm":
         if (this.runningCount() > 0) this.loopTurnActive = true;
@@ -97,6 +151,7 @@ class Session {
   disarmViaCommand(): this {
     this.record(false);
     this.loopTurnActive = false;
+    this.clearOwed();
     return this;
   }
 
@@ -104,6 +159,7 @@ class Session {
   endLane(id: LaneId, status: "paused" | "stopped"): this {
     const state = loadState(this.cwd, id)!;
     state.status = status;
+    if (status === "paused") this.clearOwed();
     saveState(this.cwd, id, state);
     updateLoopStatus(this.cwd, id, status === "paused" ? "paused" : "completed");
     this.attached.delete(`${id.lane}/${id.runTag}`);
@@ -120,7 +176,9 @@ class Session {
       loopTurnActive: ended,
       hasRunningStates: this.runningCount() > 0,
     })) {
-      this.continuations++;
+      // Mirrors queueLoopAutoContinue: queue marks the durable intent;
+      // delivery clears it.
+      this.queueContinuation("auto-continue:loop-turn");
     }
     return this;
   }
@@ -342,6 +400,76 @@ describe(`long horizon: a 60-turn session never continues without cause (${repro
     // INVARIANT: a suspended session stays suspended across a reload.
     if (!expectedMode && branch.length > 0) {
       expect(new Session(cwd, branch).start().loopMode).toBe(false);
+    }
+  });
+});
+
+describe(`long horizon: durable intent and stall bookkeeping survive 60 turns (${reproHint()})`, () => {
+  // Second long horizon. The first proves continuation is cause-gated; this
+  // one proves the durable-intent flag and the stall streak survive crashes,
+  // restarts, and disarm without drifting from their invariants.
+  const CASES = Array.from({ length: 80 }, (_, i) => i + 1);
+
+  it.each(CASES)("case %i", (index) => {
+    const next = rng(seedFor("durable", index));
+    const id = laneFor("dur", index);
+    startLoopOnDisk(id, { maxIterations: 200 });
+    const state = loadState(cwd, id)!;
+    establishBaseline(cwd, id, state, 50);
+
+    const branch: ModeEntryLike[] = [];
+    let session = new Session(cwd, branch).start();
+    let expectedMode = session.loopMode;
+
+    const inputs = ["/multiloop status", "/compact", "how is it going", "", "stop the loop", "/tree"];
+
+    // INVARIANT: pendingContinue survives a crash and stays owed until
+    // delivery, and a session_start that would otherwise stay off re-arms it.
+    for (let turn = 0; turn < 60; turn++) {
+      if (next() < 0.25 && expectedMode) {
+        // Crash between queueing and delivery: the flag is on disk and the
+        // follow-up never sent. A fresh process with armed mode re-queues
+        // exactly one continuation at start (its own first-turn queue); the
+        // durable flag persists until delivery.
+        session.crashBeforeDelivery();
+        session = new Session(cwd, branch).start();
+        expect(session.continuations).toBe(1);
+        expect(session.owedCount().length).toBe(1);
+        session.deliverContinuation();
+        expect(session.owedCount().length).toBe(0);
+      }
+
+      if (next() < 0.15) {
+        // Explicit disarm must drop the durable intent: a later crash
+        // replay cannot resurrect the continuation.
+        session.disarmViaCommand();
+        expect(session.owedCount().length).toBe(0);
+        session = new Session(cwd, branch).start();
+        expect(session.loopMode).toBe(false);
+        expect(session.continuations).toBe(0);
+        expectedMode = false;
+      }
+
+      const ranTool = next() < 0.7;
+      if (ranTool) {
+        session.toolCall();
+        // Repeated identical attempts feed the stall streak.
+        const changes = next() < 0.5 ? "same tweak" : pick(next, ["tweak-a", "tweak-b", "tweak-c"]);
+        applyLogIteration(cwd, id, state, "log", intBetween(next, 1, 60), changes);
+      }
+
+      const running = session.runningCount() > 0;
+      const shouldContinue = expectedMode && session.loopTurnActive && running;
+      const before = session.continuations;
+      session.endTurn();
+
+      expect(session.continuations).toBe(before + (shouldContinue ? 1 : 0));
+
+      // INVARIANT: stallStreak agrees with the persisted log after every turn.
+      const fresh = loadState(cwd, id)!;
+      const results = readResults(cwd, id);
+      expect(fresh.stallStreak).toBe(stallStreak(results));
+      expect(fresh.stallStreak).toBeLessThanOrEqual(60);
     }
   });
 });

@@ -6,7 +6,7 @@ pi-multiloop currently has enough state to know whether a loop is attached to th
 
 The important missing pieces are:
 
-- **Loop-turn state is runtime-only.** We record in memory when a turn was caused by `/multiloop`, `/multiloop resume`, a compaction/auto-continue prompt, or loop tooling. This is sufficient for current-session continuation, but it is not durable across process restarts.
+- **Loop-turn state is runtime-only.** We record in memory when a turn was caused by `/multiloop`, `/multiloop resume`, a compaction/auto-continue prompt, or loop tooling. This is sufficient for current-session continuation, but it is not durable across process restarts. The *intent* to continue is now durable via `pendingContinue` in the loop snapshot — re-armed on `session_start` — but the per-turn ownership flag itself is still in-memory.
 - **Persisted active-iteration markers now exist.** `multiloop_iterate` writes `activeIteration.phase = "started"`, `multiloop_measure` writes `activeIteration.phase = "measured"`, and `multiloop_decide`/`multiloop_log` clear it after appending `results.jsonl`.
 - **No reliable manual-vs-auto compaction reason in extension events.** Pi's session stream has compaction reasons internally (`manual`, `threshold`, `overflow`), but current `session_before_compact` / `session_compact` extension events do not expose that reason.
 - **No uniform record of built-in slash-command input.** Extension `input` events are emitted through `AgentSession.prompt()`. Built-in interactive commands such as `/compact` are handled before that path, so a last-user-submission heuristic cannot reliably see bare `/compact` unless Pi exposes it or changes command/input ordering.
@@ -53,8 +53,9 @@ The snapshot also records iteration metrics:
 - `bestMetric`: best kept metric.
 - `consecutiveFailures`: count used for escalation.
 - `pivotCount`: number of pivots used.
+- `stallStreak`: count of trailing identical results (same changes+metric). Reached 3, it is rendered as a stall warning in every continuation prompt — repetition without progress is a distinct signal from failure (adapted from pizza's identical-tool-round stall guard).
+- `pendingContinue`: durable auto-continue intent `{ reason, queuedAt }`. Set when a continuation follow-up is queued, cleared on delivery, and cleared on pause/stop/archive/suspend/resume. Survives process death between queueing and delivery: `session_start` re-arms continuation for lanes still carrying it.
 - `verifyCommand` / `guardCommand`: commands the loop should run.
-- `activeIteration`: optional marker for the next iteration when it has started or has measured-but-not-decided results, including recorded mechanical/prompt checks and the acceptance verdict.
 
 ### Append-only result state
 
@@ -287,6 +288,8 @@ On `session_start`, pi-multiloop resolves loop mode and then either resumes or a
 2. Attach loops the registry calls `active` whose snapshot reconstructs to `running` (`collectRunningLoops`). A corrupt or partial snapshot is skipped, not thrown — one bad lane must not stop a session from starting.
 3. Arm mode via `shouldArmLoopMode`: an explicit recorded decision always wins; otherwise a running loop on disk implies intent.
 4. If mode is armed and something is running, queue the first continuation. Otherwise print the passive resumable-loops notice as before.
+
+A lane whose snapshot still carries `pendingContinue` (queued but never delivered — e.g. the process died between queueing and delivery) is re-armed even when the recorded mode decision is off, honoring the durable intent: the continuation was owed before the crash, and nothing dropped it.
 
 Step 4 deliberately does **not** arm `loopTurnActive`. The queued prompt is the first turn's cause; that turn must earn the next continuation by calling a loop tool. Arming here would let a chat-only reply re-prompt itself once for free, defeating the anti-thrash guard on the very first turn.
 

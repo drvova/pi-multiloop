@@ -10,6 +10,10 @@ import {
   reconstructState,
   recordActionCounter,
   formatActionCounters,
+  readResults,
+  stallStreak,
+  isStalled,
+  STALL_THRESHOLD,
 } from "./state.js";
 import {
   type ConfidenceResult,
@@ -43,6 +47,8 @@ const REFINE_THRESHOLD = 3;
 const PIVOT_THRESHOLD = 5;
 const MAX_PIVOTS = 2;
 const REANCHOR_INTERVAL = 10;
+
+export { stallStreak, isStalled, STALL_THRESHOLD } from "./state.js";
 
 export function failureEscalationDecision(state: LoopState): Pick<LoopDecision, "shouldEscalate" | "escalationType"> {
   const escalation = checkEscalation(
@@ -267,6 +273,7 @@ export function applyLogIteration(
   if (metric !== undefined) {
     state.currentMetric = metric;
   }
+  state.stallStreak = stallStreak(readResults(cwd, id));
 
   completeIfStopConditionMet(cwd, id, state);
   saveState(cwd, id, state);
@@ -330,6 +337,7 @@ export function applyDecision(
   } else if (decision.action === "log") {
     state.currentMetric = measurement.median;
   }
+  state.stallStreak = stallStreak(readResults(cwd, id));
 
   if (decision.escalationType === "stop") {
     state.status = "stopped";
@@ -421,6 +429,9 @@ export function buildIterationContext(state: LoopState): string {
   }
   if (state.pivotCount > 0) {
     lines.push(`Pivots: ${state.pivotCount}/${MAX_PIVOTS}`);
+  }
+  if ((state.stallStreak ?? 0) >= STALL_THRESHOLD) {
+    lines.push(`Stalled: ${state.stallStreak} identical iterations. Change the approach — repetition without progress is a stall, not a search.`);
   }
 
   return lines.join("\n");

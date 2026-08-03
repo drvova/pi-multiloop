@@ -12,6 +12,8 @@ import {
   appendLesson,
   readLessons,
   createInitialState,
+  stallStreak,
+  isStalled,
   type IterationResult,
 } from "../extensions/pi-multiloop/state.js";
 import type { LaneId } from "../extensions/pi-multiloop/lanes.js";
@@ -361,6 +363,7 @@ describe("createInitialState", () => {
     expect(state.currentMetric).toBeNull();
     expect(state.bestMetric).toBeNull();
     expect(state.consecutiveFailures).toBe(0);
+    expect(state.stallStreak).toBe(0);
     expect(state.pivotCount).toBe(0);
     expect(state.keeps).toBe(0);
     expect(state.reverts).toBe(0);
@@ -403,5 +406,64 @@ describe("createInitialState", () => {
     const loaded = loadState(cwd, id);
     expect(loaded!.maxIterations).toBe(10);
     expect(loaded!.targetMetric).toBe(0);
+  });
+});
+
+describe("stall detection", () => {
+  function result(overrides: Partial<IterationResult>): IterationResult {
+    return { iteration: 1, timestamp: new Date().toISOString(), action: "log", ...overrides };
+  }
+
+  it("reports streak 0 on an empty log", () => {
+    expect(stallStreak([])).toBe(0);
+    expect(isStalled([])).toBe(false);
+  });
+
+  it("counts trailing identical changes+metric", () => {
+    const r = result({ changes: "same tweak", metric: 1 });
+    expect(stallStreak([r, r, r, result({ changes: "different", metric: 2 })])).toBe(1);
+    expect(stallStreak([r, r, r])).toBe(3);
+  });
+
+  it("treats identical metric with different changes as progress", () => {
+    const a = result({ changes: "tweak A", metric: 1 });
+    const b = result({ changes: "tweak B", metric: 1 });
+    expect(stallStreak([a, b, b])).toBe(2);
+  });
+
+  it("stalls only at or beyond the threshold", () => {
+    const r = result({ changes: "same", metric: 5 });
+    expect(isStalled([r, r])).toBe(false);
+    expect(isStalled([r, r, r])).toBe(true);
+  });
+
+  it("uses hypothesis when changes are absent (log-path results)", () => {
+    const a = result({ hypothesis: "h1", metric: 3 });
+    const b = result({ hypothesis: "h1", metric: 3 });
+    const c = result({ hypothesis: "h2", metric: 3 });
+    expect(stallStreak([a, b, c])).toBe(1);
+    expect(stallStreak([a, b])).toBe(2);
+  });
+});
+
+describe("pendingContinue intent", () => {
+  it("persists across save/load", () => {
+    const state = createInitialState(id, "optimize", "make bench");
+    state.pendingContinue = { reason: "auto-continue:loop-turn", queuedAt: new Date().toISOString() };
+    saveState(cwd, id, state);
+
+    const loaded = loadState(cwd, id);
+    expect(loaded!.pendingContinue?.reason).toBe("auto-continue:loop-turn");
+  });
+
+  it("survives reconstructState (disk is the source of truth)", () => {
+    const state = createInitialState(id, "optimize", "make bench");
+    state.pendingContinue = { reason: "compaction-resume", queuedAt: new Date().toISOString() };
+    appendResult(cwd, id, { iteration: 1, timestamp: new Date().toISOString(), action: "log", changes: "x", metric: 1 });
+    state.iteration = 1;
+    saveState(cwd, id, state);
+
+    const rebuilt = reconstructState(cwd, id);
+    expect(rebuilt!.pendingContinue?.reason).toBe("compaction-resume");
   });
 });

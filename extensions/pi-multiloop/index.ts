@@ -65,6 +65,8 @@ import {
 
 const activeStates = new Map<string, LoopState>();
 const COMPACTION_RESUME_RECENT_MS = 5000;
+/** Last known workspace cwd, captured at session_start for input-event saves. */
+let lastCwd: string | undefined;
 let agentRunning = false;
 let resumeAfterCompact = false;
 let lastCompactionEntryId: string | undefined;
@@ -158,6 +160,32 @@ function markLoopTurn(reason: string): void {
   loopTurnReason = reason;
 }
 
+/**
+ * Persist that an auto-continue follow-up is owed for every running lane.
+ * Survives process death between queueing and delivery: on restart, session_start
+ * re-arms continuation for lanes still carrying this flag.
+ */
+function markPendingContinue(states: LoopState[], cwd: string, reason: string): void {
+  const now = new Date().toISOString();
+  for (const state of states) {
+    if (state.status !== "running") continue;
+    state.pendingContinue = { reason, queuedAt: now };
+    saveState(cwd, { lane: state.lane, runTag: state.runTag }, state);
+  }
+}
+
+/**
+ * Clear the durable continuation intent once the follow-up is delivered, or
+ * when a lane stops being auto-continued (pause/stop/archive/suspend)
+ */
+function clearPendingContinue(states: LoopState[], cwd: string): void {
+  for (const state of states) {
+    if (!state.pendingContinue) continue;
+    delete state.pendingContinue;
+    saveState(cwd, { lane: state.lane, runTag: state.runTag }, state);
+  }
+}
+
 function sameMeasurements(a: number[] | undefined, b: number[]): boolean {
   return Array.isArray(a) && a.length === b.length && a.every((value, index) => value === b[index]);
 }
@@ -234,6 +262,7 @@ function queueCompactionResume(
   const states = runningStates();
   if (states.length === 0 || ctx.hasPendingMessages()) return;
 
+  markPendingContinue(states, ctx.cwd, "compaction-resume");
   setTimeout(() => {
     const latestStates = runningStates();
     if (latestStates.length === 0) return;
@@ -241,6 +270,7 @@ function queueCompactionResume(
     try {
       markLoopTurn("compaction-resume");
       pi.sendUserMessage(buildCompactionResumePrompt(latestStates, compactionEntryId), { deliverAs: "followUp" });
+      clearPendingContinue(latestStates, ctx.cwd);
     } catch (err) {
       ctx.ui.notify(`multiloop resume after compact failed: ${(err as Error).message}`, "error");
     }
@@ -255,6 +285,7 @@ function queueLoopAutoContinue(
   const states = runningStates();
   if (states.length === 0 || ctx.hasPendingMessages()) return;
 
+  markPendingContinue(states, ctx.cwd, `auto-continue:${reason}`);
   setTimeout(() => {
     const latestStates = runningStates();
     if (latestStates.length === 0) return;
@@ -262,6 +293,7 @@ function queueLoopAutoContinue(
     try {
       markLoopTurn(`auto-continue:${reason}`);
       pi.sendUserMessage(buildAutoContinuePrompt(latestStates), { deliverAs: "followUp" });
+      clearPendingContinue(latestStates, ctx.cwd);
     } catch (err) {
       ctx.ui.notify(`multiloop auto-continue failed: ${(err as Error).message}`, "error");
     }
@@ -711,6 +743,7 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.on("session_start", async (_event, ctx) => {
+    lastCwd = ctx.cwd;
     const recorded = readModeDecision(ctx);
     const attached = attachRunningLoops(ctx.cwd);
     loopMode = shouldArmLoopMode({
@@ -728,6 +761,16 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
+    const owed = runningStates().filter((state) => state.pendingContinue);
+    if (owed.length > 0) {
+      // A continuation was queued and never delivered (process died between
+      // queueing and delivery). Re-arm it from the durable intent, same
+      // first-turn discipline as above.
+      queueLoopAutoContinue(pi, ctx, owed[0].pendingContinue!.reason);
+      updateStatus(ctx);
+      return;
+    }
+
     announceResumableLoops(pi, ctx);
   });
 
@@ -740,6 +783,7 @@ export default function (pi: ExtensionAPI) {
         loopMode = false;
         loopTurnActive = false;
         loopTurnReason = undefined;
+        clearPendingContinue(runningStates(), lastCwd ?? "");
         break;
       case "arm":
         // Only meaningful while something is actually running; arming with no
@@ -1370,6 +1414,7 @@ export default function (pi: ExtensionAPI) {
     if (refusal) return { ok: false, reason: `Cannot resume ${formatLaneId(id)}: ${refusal}` };
 
     state.status = "running";
+    delete state.pendingContinue;
     saveState(ctx.cwd, id, state);
     activeStates.set(stateKey(id), state);
     updateLoopStatus(ctx.cwd, id, "active");
@@ -1384,6 +1429,7 @@ export default function (pi: ExtensionAPI) {
     if (!state) return `No state found for ${formatLaneId(id)}.`;
 
     state.status = "paused";
+    delete state.pendingContinue;
     saveState(ctx.cwd, id, state);
     updateLoopStatus(ctx.cwd, id, "paused");
     activeStates.delete(key);
@@ -1401,6 +1447,7 @@ export default function (pi: ExtensionAPI) {
     if (!state) return `No state found for ${formatLaneId(id)}.`;
 
     state.status = "stopped";
+    delete state.pendingContinue;
     saveState(ctx.cwd, id, state);
     updateLoopStatus(ctx.cwd, id, "completed");
     activeStates.delete(key);

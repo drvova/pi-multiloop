@@ -559,6 +559,15 @@ describe("buildIterationContext", () => {
     expect(buildIterationContext(state)).toContain("reduce latency");
   });
 
+  it("warns about a stall when the streak passes the threshold", () => {
+    const below = makeState({ stallStreak: 2 });
+    expect(buildIterationContext(below)).not.toContain("Stalled");
+
+    const stalled = makeState({ stallStreak: 3 });
+    expect(buildIterationContext(stalled)).toContain("Stalled:");
+    expect(buildIterationContext(stalled)).toContain("repetition without progress");
+  });
+
   it("includes metric info when baseline is set", () => {
     const state = makeState({ baseline: 100, currentMetric: 85, bestMetric: 80 });
     const ctx = buildIterationContext(state);

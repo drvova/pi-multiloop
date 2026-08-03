@@ -34,6 +34,42 @@ export interface IterationResult {
   acceptanceReason?: string;
 }
 
+/**
+ * Consecutive identical iterations without progress, detected by signature
+ * (changes + metric). Adapted from pizza's identical-tool-round stall guard:
+ * repetition without progress is a distinct signal from failure — a loop that
+ * keeps succeeding at the same thing is still stuck.
+ */
+export const STALL_THRESHOLD = 3;
+
+function iterationSignature(result: IterationResult): string {
+  return `${result.changes ?? result.hypothesis ?? ""}|${result.metric ?? ""}`;
+}
+
+/**
+ * Count trailing results that share the same changes+metric signature.
+ * 0 for an empty log; 1 when the newest result differs from its predecessor.
+ */
+export function stallStreak(results: IterationResult[]): number {
+  if (results.length === 0) return 0;
+  const sig = iterationSignature(results[results.length - 1]);
+  let streak = 1;
+  for (let i = results.length - 2; i >= 0; i--) {
+    if (iterationSignature(results[i]) !== sig) break;
+    streak++;
+  }
+  return streak;
+}
+
+/**
+ * True when the loop has repeated the same approach without any metric
+ * movement for STALL_THRESHOLD or more consecutive iterations.
+ */
+export function isStalled(results: IterationResult[]): boolean {
+  return stallStreak(results) >= STALL_THRESHOLD;
+}
+
+
 export interface ActiveIteration {
   iteration: number;
   phase: "started" | "measured";
@@ -66,6 +102,10 @@ export interface LoopState {
   blocked: number;
   lastAction: ResultAction | null;
   lastActionAt?: string;
+  /** Consecutive identical results (changes+metric) at the tail of the log. */
+  stallStreak?: number;
+  /** Durable auto-continue intent: a continuation was queued and not yet delivered. */
+  pendingContinue?: { reason: string; queuedAt: string };
   status: "running" | "paused" | "completed" | "stopped" | "archived";
   verifyCommand: string;
   guardCommand?: string;
@@ -233,6 +273,7 @@ export function reconstructState(cwd: string, id: LaneId): LoopState | null {
     state.crashes ??= 0;
     state.blocked ??= 0;
     state.lastAction ??= null;
+    state.stallStreak ??= 0;
     if (state.activeIteration && state.activeIteration.iteration <= state.iteration) {
       delete state.activeIteration;
     }
@@ -295,6 +336,7 @@ export function reconstructState(cwd: string, id: LaneId): LoopState | null {
   state.currentMetric = currentMetric;
   state.bestMetric = bestMetric;
   state.consecutiveFailures = consecutiveFailures;
+  state.stallStreak = stallStreak(results);
   if (sawEscalationMetadata) {
     state.pivotCount = Math.max(state.pivotCount ?? 0, replayedPivotCount);
   }
@@ -346,6 +388,7 @@ export function createInitialState(
     currentMetric: null,
     bestMetric: null,
     consecutiveFailures: 0,
+    stallStreak: 0,
     pivotCount: 0,
     keeps: 0,
     reverts: 0,

@@ -11,6 +11,7 @@ import {
   revertVerifierCheck,
   extractHash,
   workspaceDriftRefusal,
+  captureStartFingerprint,
   pinnedConfigFields,
   pinnedFieldsChanged,
   configPinRefusal,
@@ -349,9 +350,30 @@ describe("workspaceDriftRefusal", () => {
     expect(workspaceDriftRefusal("fp-v1", "fp-v1")).toBeNull();
   });
 
-  it("refuses when the workspace changed since the last recorded decision", () => {
+  it("refuses when the workspace changed since the last recorded boundary", () => {
     const refusal = workspaceDriftRefusal("fp-v1", "fp-v2");
-    expect(refusal).toContain("Workspace changed since the last recorded decision");
+    expect(refusal).toContain("Workspace changed since the last recorded boundary");
     expect(refusal).toContain("call multiloop_iterate first");
+  });
+});
+
+
+describe("captureStartFingerprint", () => {
+  it("returns null when no verifier is configured", () => {
+    const result = captureStartFingerprint(cwd, undefined);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.fingerprint).toBeNull();
+  });
+
+  it("captures a trimmed hash fingerprint from a runnable command", () => {
+    const result = captureStartFingerprint(cwd, 'node -e "process.stdout.write(\'  abcdef  \\n\')"');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.fingerprint).toBe("abcdef");
+  });
+
+  it("refuses loudly when the verifier cannot run", () => {
+    const result = captureStartFingerprint(cwd, "node -e 'process.exit(1)'");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.length).toBeGreaterThan(0);
   });
 });

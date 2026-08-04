@@ -74,6 +74,7 @@ import {
   revertVerifierCheck,
   runVerifierCommand,
   workspaceDriftRefusal,
+  captureStartFingerprint,
   pinnedConfigFields,
   configPinRefusal,
 } from "./anchors.js";
@@ -1007,6 +1008,19 @@ export default function (pi: ExtensionAPI) {
 
     if (state.protectedPaths?.length) {
       state.protectedBaseline = snapshotProtectedHashes(ctx.cwd, state.protectedPaths);
+    }
+    if (state.revertVerifier) {
+      const boundary = captureStartFingerprint(ctx.cwd, state.revertVerifier);
+      if (!boundary.ok) {
+        throw new Error(
+          [
+            `Cannot start loop ${formatLaneId(id)}: the revert verifier must be runnable now — the workspace boundary is hashed at start so the first iterate can detect out-of-band edits.`,
+            boundary.error,
+            "Fix the verifier, then retry multiloop_start.",
+          ].join("\n"),
+        );
+      }
+      state.lastWorkspaceFingerprint = boundary.fingerprint ?? undefined;
     }
     state.pinnedConfig = pinnedConfigFields(state);
     ensureLaneDir(ctx.cwd, id);

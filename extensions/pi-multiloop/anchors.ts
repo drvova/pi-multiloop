@@ -321,9 +321,26 @@ export function workspaceDriftRefusal(
   if (!lastFingerprint) return null;
   if (lastFingerprint === currentFingerprint) return null;
   return [
-    "Workspace changed since the last recorded decision, before an iteration was started.",
+    "Workspace changed since the last recorded boundary (loop start or decision), before an iteration was started.",
     "Edits are only allowed inside an iteration: call multiloop_iterate first, then change files.",
     "The revert verifier fingerprints the workspace at iterate; a dirty baseline would let a revert be verified against the wrong state.",
-    "Undo the out-of-band changes, or if they are intentional, start a new loop to adopt them as the new baseline.",
+    "Undo the out-of-band changes, or if they are intentional, start a new loop to fold them into the new baseline.",
   ].join("\n");
+}
+
+/**
+ * Capture the workspace fingerprint at loop start so the first iterate
+ * already has a boundary to drift against. Returns null when no verifier is
+ * configured. A command that cannot run refuses to start (Jidoka
+ * stop-the-line): a loop whose boundary cannot be hashed has no integrity to
+ * protect.
+ */
+export function captureStartFingerprint(
+  cwd: string,
+  command: string | undefined
+): { ok: true; fingerprint: string | null } | { ok: false; error: string } {
+  if (!command?.trim()) return { ok: true, fingerprint: null };
+  const result = runVerifierCommand(cwd, command);
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, fingerprint: result.output.trim() };
 }

@@ -591,6 +591,14 @@ describe("buildIterationContext", () => {
     expect(buildIterationContext(makeState())).not.toContain("Revert verifier");
   });
 
+  it("renders the pinned workspace boundary when a fingerprint exists", () => {
+    expect(buildIterationContext(makeState({ lastWorkspaceFingerprint: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" }))).toContain("Workspace boundary pinned: edits outside an iteration are refused");
+  });
+
+  it("omits the boundary line when no fingerprint is recorded", () => {
+    expect(buildIterationContext(makeState())).not.toContain("Workspace boundary pinned");
+  });
+
   it("renders the min-measurements line only when raised above the default", () => {
     expect(buildIterationContext(makeState({ minMeasurements: 3 }))).toContain("Min measurements before keep/revert: 3");
     expect(buildIterationContext(makeState({ minMeasurements: 1 }))).not.toContain("Min measurements");

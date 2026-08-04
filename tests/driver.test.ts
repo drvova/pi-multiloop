@@ -190,6 +190,23 @@ describe("multiloop-run driver", () => {
     expect(winKillArgs(1234)).toEqual(["taskkill", "/pid", "1234", "/T", "/F"]);
   });
 
+  it("surfaces a spawn error instead of hanging on the exit event", async () => {
+    const { dir } = makeLoopDir();
+    try {
+      const { output, exited } = spawnIteration(
+        resolve(join(dir, "no-such-executable")),
+        [],
+        dir,
+        { PATH: process.env.PATH ?? "/bin" }
+      );
+      const result = await Promise.race([exited, new Promise((r) => setTimeout(() => r(null), 8000))]);
+      expect(result).not.toBeNull();
+      expect(output.text).toContain("[spawn error]");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("polls for the iteration to advance and reaps the child group", async () => {
     const { dir, entry, writeState } = makeLoopDir();
     try {
@@ -206,7 +223,7 @@ describe("multiloop-run driver", () => {
       expect((outcome.state as { iteration: number }).iteration).toBe(1);
       // The driver then reaps the still-alive child (real pi never exits).
       const graceful = await stopIteration(child, 3000);
-      await exited;
+      await Promise.race([exited, new Promise((r) => setTimeout(() => r(null), 5000))]);
       expect(graceful || true).toBeTruthy();
       expect(output.text.length).toBeGreaterThan(0);
       expect(JSON.parse(readFileSync(stateFile, "utf8")).iteration).toBe(1);
@@ -229,7 +246,7 @@ describe("multiloop-run driver", () => {
       const outcome = await iterationAdvanced(dir, entry, 0, 1500);
       expect(outcome.advanced).toBe(false);
       await stopIteration(child, 2000);
-      await exited;
+      await Promise.race([exited, new Promise((r) => setTimeout(() => r(null), 5000))]);
       expect(JSON.parse(readFileSync(stateFile, "utf8")).iteration).toBe(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });

@@ -177,6 +177,12 @@ export function spawnIteration(cmd, argv, cwd, env) {
   child.stderr.on("data", tee);
   const exited = new Promise((resolveExit) => {
     child.on("exit", (code, signal) => resolveExit({ code, signal }));
+    // A failed spawn has no exit event; without this the driver would hang
+    // forever on `await exited`. Surface the cause instead.
+    child.on("error", (err) => {
+      output.text += `[spawn error] ${err.message}\n`;
+      resolveExit({ code: null, signal: null, error: err.message });
+    });
   });
   return { child, output, exited };
 }
@@ -202,6 +208,11 @@ export function stopIteration(child, graceMs) {
           spawnSync("taskkill", winKillArgs(child.pid), { stdio: "ignore" });
         } catch {
           // Tree already gone.
+        }
+        try {
+          child.kill(); // direct TerminateProcess fallback
+        } catch {
+          // Child already gone.
         }
         resolveStop(false);
       }, graceMs).unref();
@@ -294,9 +305,10 @@ export async function main() {
       if (!graceful) console.log("multiloop-run: child did not exit on SIGTERM; killed");
     } else {
       await stopIteration(child, 3000).catch(() => {});
-      const collection = await exited;
+      // outcome.exited already tells whether the process ended; do not await
+      // `exited` again — a child that survived the reap would hang the driver.
       if (outcome.exited) {
-        console.error(`multiloop-run: session for iteration ${nextIteration} exited with code ${collection.code} without recording the iteration`);
+        console.error(`multiloop-run: session for iteration ${nextIteration} exited without recording the iteration`);
       } else {
         console.error(`multiloop-run: iteration ${nextIteration} timed out after ${opts.timeoutSec}s with no recorded result`);
       }

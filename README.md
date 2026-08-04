@@ -34,6 +34,8 @@ pi-multiloop gives each loop its own **lane** so they can run side by side witho
 - **Frozen anchors** — declare files the loop must never modify (`protectedPaths`); their content is hash-verified at every measure, so acceptance blocks a keep if the optimizer touched them
 - **Config pinning** — the verifier and stop-condition fields are pinned at start; editing them mid-loop stops the line and names the tampered field
 - **Independent re-verification** — optional `auditVerifier` command that the extension itself executes at every measure (never the agent), compares its numeric output against the reported metric, and blocks acceptance on disagreement — the graded party cannot present its own grade
+- **Rollback verified, not asserted** — optional `revertVerifier` command the extension executes when a revert is decided; the workspace must actually return to its pre-iteration value, on the extension's word, or the revert is refused. The agent can no longer claim a rollback it never performed
+- **No more deciding on a coin flip** — optional `minMeasurements` (default 1) raises how many runs must back a keep/revert; undersampled loops degrade to log instead of promoting on noise (deterministic metrics keep the fast path)
 
 ## Install
 

@@ -57,6 +57,7 @@ import {
 } from "./mode.js";
 import {
   assessAcceptance,
+  enforceMinimumMeasurements,
   ensureRequiredChecks,
   formatVerificationChecks,
   normalizeVerificationChecks,
@@ -69,6 +70,7 @@ import {
   snapshotProtectedHashes,
   protectedFileCheck,
   auditVerifierCheck,
+  revertVerifierCheck,
   pinnedConfigFields,
   configPinRefusal,
 } from "./anchors.js";
@@ -378,7 +380,7 @@ export function buildSetupGuidePrompt(goalSeed?: string): string {
     "Setup contract summary (the canonical version lives with the multiloop skill at `references/LOOP_GUIDE.md`):",
     "1. Scan the repo before proposing a loop: inspect structure, manifests/scripts/configs, tests/benches, and relevant TODO/plan files. Do not edit files during setup.",
     "2. Ask at least one repo-grounded clarification round before launch, even if the request seems obvious. Prefer concrete defaults and multiple-choice questions.",
-    "3. Infer and confirm: goal, mode, lane, scope, protected files, audit verifier, metric name, metric direction, acceptance mode, verify command, guard command, prompt verifier, acceptance policy, stop condition/iteration cap, and rollback safety.",
+    "3. Infer and confirm: goal, mode, lane, scope, protected files, audit verifier, revert verifier, min measurements, metric name, metric direction, acceptance mode, verify command, guard command, prompt verifier, acceptance policy, stop condition/iteration cap, and rollback safety.",
     "4. Respect the two-phase launch boundary: all clarification before explicit go/start/launch; after approval, continue autonomously until stopped, paused, completed, or blocked.",
     "5. For punchlists, default to acceptanceMode=log with open_or_partial_items lower-is-better progress; use keep-revert only when the user confirms a metric optimization goal plus rollback safety.",
     "6. For compound goals like performance improves while output remains correct, configure a metric verify command plus mechanical/prompt checks. Acceptance should be: metric improves and every check passes.",
@@ -883,6 +885,8 @@ export default function (pi: ExtensionAPI) {
     guardCommand?: string;
     promptVerifier?: string;
     auditVerifier?: string;
+    revertVerifier?: string;
+    minMeasurements?: number;
     acceptancePolicy?: string;
     metricName?: string;
     metricDirection?: "lower" | "higher";
@@ -903,6 +907,8 @@ export default function (pi: ExtensionAPI) {
       guardCommand: config.guardCommand,
       promptVerifier: config.promptVerifier,
       auditVerifier: config.auditVerifier,
+      revertVerifier: config.revertVerifier,
+      minMeasurements: config.minMeasurements,
       acceptancePolicy,
       metricName: config.metricName,
       metricDirection: config.metricDirection ?? MODES[config.mode].defaultDirection,
@@ -949,7 +955,8 @@ export default function (pi: ExtensionAPI) {
       state.guardCommand ? `Guard: \`${state.guardCommand}\`` : null,
       state.promptVerifier ? `Prompt verifier: ${state.promptVerifier}` : null,
       state.auditVerifier ? `Audit verifier (extension-run, re-checks every measure): \`${state.auditVerifier}\`` : null,
-      state.metricName ? `Metric: ${state.metricName} (${state.metricDirection})` : `Metric direction: ${state.metricDirection}`,
+      state.revertVerifier ? `Revert verifier (extension-run, checks rollback restored the baseline): \`${state.revertVerifier}\`` : null,
+      state.minMeasurements && state.minMeasurements > 1 ? `Min measurements before keep/revert: ${state.minMeasurements}` : null,
       `Acceptance mode: ${state.acceptanceMode}`,
       state.scope ? `Scope: ${state.scope}` : null,
       state.protectedPaths?.length
@@ -982,7 +989,11 @@ export default function (pi: ExtensionAPI) {
     guardCommand: Type.Optional(Type.String({ description: "Optional pass/fail guard command" })),
     promptVerifier: Type.Optional(Type.String({ description: "Optional prompt-based correctness verifier / review criterion" })),
     auditVerifier: Type.Optional(Type.String({ description: "Optional extension-executed verification command; its numeric output must match the reported metric within tolerance at every measure. Guards against fabricated or stale reports." })),
-    metricName: Type.Optional(Type.String({ description: "Metric name" })),
+    revertVerifier: Type.Optional(Type.String({ description: "Optional extension-executed rollback check; its numeric output must match the pre-iteration value before a revert is recorded. Guards against unexecuted rollbacks." })),
+    minMeasurements: Type.Optional(Type.Integer({
+      minimum: 1,
+      description: "Minimum measurements before keep/revert may be decided (default 1; raise for noisy metrics so a single run cannot drive a decision).",
+    })),
     metricDirection: Type.Optional(Type.Union([Type.Literal("lower"), Type.Literal("higher")], { description: "Whether lower or higher metric values are better" })),
     acceptanceMode: Type.Optional(Type.Union([Type.Literal("log"), Type.Literal("keep-revert")], { description: "Acceptance behavior: log/progress or optimize-style keep/revert" })),
     scope: Type.Optional(Type.String({ description: "Files/directories in scope" })),
@@ -1181,7 +1192,11 @@ export default function (pi: ExtensionAPI) {
 
       const baseline = state.currentMetric ?? state.baseline;
       const improved = isImprovement(baseline, confidence.median, confidence.mad, state.metricDirection);
-      const acceptance = assessAcceptance(state, improved, checks);
+      const acceptance = enforceMinimumMeasurements(
+        state,
+        assessAcceptance(state, improved, checks),
+        confidence.measurements.length
+      );
       const activeIteration = state.activeIteration ?? {
         iteration: state.iteration + 1,
         phase: "started" as const,
@@ -1309,6 +1324,25 @@ export default function (pi: ExtensionAPI) {
       const confidence = assessConfidence(params.measurements);
       const baseline = state.currentMetric ?? state.baseline!;
 
+      let failedRevertEvidence: string | null = null;
+      if (params.action === "revert" && state.revertVerifier) {
+        const revertCheck = revertVerifierCheck(ctx.cwd, state.revertVerifier, state.currentMetric);
+        if (revertCheck) {
+          state.activeIteration.checks = [...(state.activeIteration.checks ?? []), revertCheck];
+          if (!revertCheck.passed) {
+            failedRevertEvidence = revertCheck.evidence ?? "Revert verifier failed.";
+          }
+        }
+      }
+      if (failedRevertEvidence) {
+        return textResult(
+          [
+            `Rollback check failed for ${formatLaneId(id)} iteration ${state.activeIteration.iteration}.`,
+            failedRevertEvidence,
+            "The workspace must be restored to its pre-iteration state before a revert can be recorded. Undo the changes, then retry multiloop_decide.",
+          ].join("\n"),
+        );
+      }
       const acceptanceSuffix = state.activeIteration.acceptanceReason
         ? ` (${state.activeIteration.acceptanceReason})`
         : "";

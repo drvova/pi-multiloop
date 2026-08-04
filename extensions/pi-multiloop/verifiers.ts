@@ -115,6 +115,37 @@ export function assessAcceptance(
   };
 }
 
+/**
+ * Refuse a keep/revert decision resting on too few measurements.
+ *
+ * A single noisy run is a coin flip, not a measurement (agent-eval variance is
+ * dominated by seed noise), and "keep it if the score went up" re-applied across
+ * iterations is uncontrolled adaptive multiple testing. But deterministic
+ * metrics legitimately need one run, so the minimum is a per-loop pinned knob
+ * (`minMeasurements`, default 1) rather than a universal constant — statistical
+ * power decides, not a fixed number.
+ *
+ * When the count is short, the action degrades to `log`: record progress, do
+ * not promote or roll back on noise, keep measuring. Only keep-revert loops
+ * are gated; log-mode loops are untouched.
+ */
+export function enforceMinimumMeasurements(
+  state: Pick<LoopState, "mode"> & Partial<Pick<LoopState, "acceptanceMode" | "minMeasurements">>,
+  acceptance: AcceptanceAssessment,
+  measurementCount: number
+): AcceptanceAssessment {
+  const minimum = state.minMeasurements ?? 1;
+  if (resolveAcceptanceMode(state) !== "keep-revert" || measurementCount >= minimum) {
+    return acceptance;
+  }
+  return {
+    ...acceptance,
+    acceptancePassed: false,
+    recommendedAction: "log",
+    acceptanceReason: `Insufficient measurements (${measurementCount}); this loop requires at least ${minimum} before keep/revert. Continue measuring.`,
+  };
+}
+
 export function formatVerificationChecks(checks: VerificationCheck[]): string[] {
   if (checks.length === 0) return [];
   return checks.map((check) => {

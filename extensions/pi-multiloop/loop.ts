@@ -389,6 +389,12 @@ export function buildIterationContext(state: LoopState): string {
   if (state.auditVerifier) {
     lines.push(`Audit verifier (extension-run, re-checks every measure): \`${state.auditVerifier}\``);
   }
+  if (state.revertVerifier) {
+    lines.push(`Revert verifier (extension-run, checks rollback restored the baseline): \`${state.revertVerifier}\``);
+  }
+  if (state.minMeasurements && state.minMeasurements > 1) {
+    lines.push(`Min measurements before keep/revert: ${state.minMeasurements}`);
+  }
   if (state.acceptancePolicy) {
     lines.push(`Acceptance policy: ${state.acceptancePolicy}`);
   } else if (state.guardCommand || state.promptVerifier) {

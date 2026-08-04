@@ -71,6 +71,8 @@ export function pinnedConfigFields(state: LoopState): Record<string, unknown> {
     guardCommand: state.guardCommand ?? null,
     promptVerifier: state.promptVerifier ?? null,
     auditVerifier: state.auditVerifier ?? null,
+    revertVerifier: state.revertVerifier ?? null,
+    minMeasurements: state.minMeasurements ?? null,
     metricName: state.metricName ?? null,
     metricDirection: state.metricDirection,
     targetMetric: state.targetMetric ?? null,
@@ -80,19 +82,46 @@ export function pinnedConfigFields(state: LoopState): Record<string, unknown> {
 }
 
 /**
- * Relative tolerance for audit-verifier agreement: catches fabricated or stale
- * reports while tolerating float formatting noise (42 vs 42.0). A real lie is
- * orders of magnitude past this; a formatting quirk never is.
+ * Relative tolerance for audit/revert-verifier agreement: catches fabricated or
+ * stale reports while tolerating float formatting noise (42 vs 42.0). A real
+ * lie is orders of magnitude past this; a formatting quirk never is.
  */
 export const AUDIT_TOLERANCE = 1e-6;
 
-/** Timeout for the extension-run audit command; a hung audit is a failed audit. */
+/** Timeout for the extension-run verifier command; a hung check is a failed check. */
 export const AUDIT_TIMEOUT_MS = 120_000;
 
 /** First numeric token in command output, or null when none exists. */
 export function parseAuditOutput(output: string): number | null {
   const match = output.match(/-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/);
   return match ? Number(match[0]) : null;
+}
+
+/**
+ * Shared extension-owned command executor. The extension runs the command in
+ * its own process (never through the agent) so the graded party cannot present
+ * its own grade. Both the audit verifier and the revert verifier ride this.
+ */
+function runVerifierCommand(cwd: string, command: string): { ok: true; output: string } | { ok: false; error: string } {
+  try {
+    return {
+      ok: true,
+      output: execSync(command, {
+        cwd,
+        encoding: "utf8",
+        shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+        timeout: AUDIT_TIMEOUT_MS,
+      }),
+    };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message.split("\n")[0] ?? String(err) };
+  }
+}
+
+/** True when the parsed output and the expected value agree within tolerance. */
+function matchesTolerance(parsed: number, expected: number): boolean {
+  const scale = Math.max(1, Math.abs(parsed), Math.abs(expected));
+  return Math.abs(parsed - expected) <= AUDIT_TOLERANCE * scale;
 }
 
 /**
@@ -112,36 +141,27 @@ export function auditVerifierCheck(
   reportedMedian: number
 ): VerificationCheck | null {
   if (!command?.trim()) return null;
-  let output: string;
-  try {
-    output = execSync(command, {
-      cwd,
-      encoding: "utf8",
-      shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
-      timeout: AUDIT_TIMEOUT_MS,
-    });
-  } catch (err) {
+  const result = runVerifierCommand(cwd, command);
+  if (!result.ok) {
     return {
       name: "audit-verifier",
       kind: "mechanical",
       passed: false,
       command,
-      evidence: `Audit verifier command failed: ${(err as Error).message.split("\n")[0] ?? String(err)}`,
+      evidence: `Audit verifier command failed: ${result.error}`,
     };
   }
-  const parsed = parseAuditOutput(output);
+  const parsed = parseAuditOutput(result.output);
   if (parsed === null) {
     return {
       name: "audit-verifier",
       kind: "mechanical",
       passed: false,
       command,
-      evidence: `Audit verifier produced no numeric output: ${output.trim().slice(0, 200)}`,
+      evidence: `Audit verifier produced no numeric output: ${result.output.trim().slice(0, 200)}`,
     };
   }
-  const scale = Math.max(1, Math.abs(parsed), Math.abs(reportedMedian));
-  const matches = Math.abs(parsed - reportedMedian) <= AUDIT_TOLERANCE * scale;
-  if (matches) {
+  if (matchesTolerance(parsed, reportedMedian)) {
     return {
       name: "audit-verifier",
       kind: "mechanical",
@@ -156,6 +176,61 @@ export function auditVerifierCheck(
     passed: false,
     command,
     evidence: `Audit verifier disagreement: ${parsed} (extension-run) != ${reportedMedian} (reported measurement). The report does not match ground truth.`,
+  };
+}
+
+/**
+ * Extension-executed rollback verification: after a revert decision the
+ * extension runs the configured command and compares its parsed numeric output
+ * against the pre-iteration value the rollback must restore. The agent cannot
+ * assert its own rollback; the workspace either matches the baseline or the
+ * revert is refused.
+ *
+ * Returns null when no revert verifier is configured or there is no baseline
+ * to restore against.
+ */
+export function revertVerifierCheck(
+  cwd: string,
+  command: string | undefined,
+  expectedBaseline: number | null
+): VerificationCheck | null {
+  if (!command?.trim()) return null;
+  if (expectedBaseline === null) return null;
+  const result = runVerifierCommand(cwd, command);
+  if (!result.ok) {
+    return {
+      name: "revert-verifier",
+      kind: "mechanical",
+      passed: false,
+      command,
+      evidence: `Revert verifier command failed: ${result.error}`,
+    };
+  }
+  const parsed = parseAuditOutput(result.output);
+  if (parsed === null) {
+    return {
+      name: "revert-verifier",
+      kind: "mechanical",
+      passed: false,
+      command,
+      evidence: `Revert verifier produced no numeric output: ${result.output.trim().slice(0, 200)}`,
+    };
+  }
+  if (matchesTolerance(parsed, expectedBaseline)) {
+    return {
+      name: "revert-verifier",
+      kind: "mechanical",
+      passed: true,
+      command,
+      evidence: `Revert verifier agreed: ${parsed} == ${expectedBaseline} (pre-iteration value). Rollback applied.`,
+    };
+  }
+  return {
+    name: "revert-verifier",
+    kind: "mechanical",
+    passed: false,
+    command,
+    evidence: `Revert verifier disagreement: ${parsed} != ${expectedBaseline} (pre-iteration value). The workspace was not restored to its pre-iteration state.`,
   };
 }
 

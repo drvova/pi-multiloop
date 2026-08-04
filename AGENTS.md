@@ -81,7 +81,7 @@ npx vitest run
 | `tests/exhaustive.test.ts` | enumeration | Cross-product of the decision space vs `tests/support/oracle.ts` |
 | `tests/properties.test.ts` | property | Invariants over seeded random histories on the real filesystem |
 | `tests/metamorphic.test.ts` | metamorphic | Relations between related inputs |
-| `tests/anchors.test.ts` | unit + mutation | Frozen-rule anchors: protected-file hash drift blocks the keep; pinned config tamper refusal names the field and persists across save/load; the extension-run `auditVerifier` re-checks the reported metric against ground truth and blocks on disagreement |
+| `tests/anchors.test.ts` | unit + mutation | Frozen-rule anchors: protected-file hash drift blocks the keep; pinned config tamper refusal names the field and persists across save/load; the extension-run `auditVerifier` re-checks the reported metric against ground truth and blocks on disagreement; the extension-run `revertVerifier` refuses a revert until the workspace matches the pre-iteration value |
 `tests/support/session-harness.ts` is the shared Session simulator used by `sessions.test.ts` and `longhorizon-env.test.ts`. It mirrors the index.ts wiring (session_start arms from recorded decision plus disk; tools arm the per-turn flag; agent_end asks `shouldQueueContinuation`) and is composition-only — every decision goes through the production function.
 
 `tests/support/oracle.ts` is an independent model of the stop-condition contract, written from README/STATE.md rather than from `loop.ts`. Keep it that way: if it is ever derived from the implementation, the exhaustive suite stops proving anything.

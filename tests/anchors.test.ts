@@ -8,6 +8,7 @@ import {
   snapshotProtectedHashes,
   protectedFileCheck,
   auditVerifierCheck,
+  revertVerifierCheck,
   pinnedConfigFields,
   pinnedFieldsChanged,
   configPinRefusal,
@@ -127,8 +128,10 @@ describe("pinnedConfigFields", () => {
       "maxIterations",
       "metricDirection",
       "metricName",
+      "minMeasurements",
       "promptVerifier",
       "protectedPaths",
+      "revertVerifier",
       "targetMetric",
       "verifyCommand",
     ]);
@@ -138,6 +141,15 @@ describe("pinnedConfigFields", () => {
     const state = anchoredState([], "node audit.mjs");
     expect(state.auditVerifier).toBe("node audit.mjs");
     expect(pinnedConfigFields(state).auditVerifier).toBe("node audit.mjs");
+  });
+
+  it("pins the revert verifier and min measurements when configured", () => {
+    const state = createInitialState(id, "optimize", "echo 1");
+    state.revertVerifier = "node revert-check.mjs";
+    state.minMeasurements = 3;
+    const fields = pinnedConfigFields(state);
+    expect(fields.revertVerifier).toBe("node revert-check.mjs");
+    expect(fields.minMeasurements).toBe(3);
   });
 });
 
@@ -212,6 +224,51 @@ describe("auditVerifierCheck", () => {
 
   it("fails loudly when the command errors", () => {
     const check = auditVerifierCheck(cwd, 'node -e "process.exit(1)"', 1);
+    expect(check?.passed).toBe(false);
+    expect(check?.evidence).toContain("command failed");
+  });
+});
+
+describe("revertVerifierCheck", () => {
+  it("returns null when no revert command is configured", () => {
+    expect(revertVerifierCheck(cwd, undefined, 42)).toBeNull();
+    expect(revertVerifierCheck(cwd, "", 42)).toBeNull();
+  });
+
+  it("returns null when there is no baseline to restore against", () => {
+    expect(revertVerifierCheck(cwd, "node -e \"console.log(42)\"", null)).toBeNull();
+  });
+
+  it("passes when the command output matches the pre-iteration value", () => {
+    const check = revertVerifierCheck(cwd, 'node -e "console.log(42)"', 42);
+    expect(check?.name).toBe("revert-verifier");
+    expect(check?.kind).toBe("mechanical");
+    expect(check?.passed).toBe(true);
+    expect(check?.evidence).toContain("Rollback applied");
+  });
+
+  it("tolerates float formatting noise within the relative tolerance", () => {
+    const check = revertVerifierCheck(cwd, 'node -e "console.log(42.0000001)"', 42);
+    expect(check?.passed).toBe(true);
+  });
+
+  it("fails when the workspace was not restored to the baseline", () => {
+    const check = revertVerifierCheck(cwd, 'node -e "console.log(42)"', 15);
+    expect(check?.passed).toBe(false);
+    expect(check?.evidence).toContain("disagreement");
+    expect(check?.evidence).toContain("42");
+    expect(check?.evidence).toContain("15");
+    expect(check?.evidence).toContain("not restored");
+  });
+
+  it("fails when the command produces no numeric output", () => {
+    const check = revertVerifierCheck(cwd, 'node -e "console.log(\'no numbers here\')"', 1);
+    expect(check?.passed).toBe(false);
+    expect(check?.evidence).toContain("no numeric output");
+  });
+
+  it("fails loudly when the command errors", () => {
+    const check = revertVerifierCheck(cwd, 'node -e "process.exit(1)"', 1);
     expect(check?.passed).toBe(false);
     expect(check?.evidence).toContain("command failed");
   });

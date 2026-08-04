@@ -112,6 +112,10 @@ export interface LoopState {
   promptVerifier?: string;
   /** Extension-executed verification command; numeric output must match the reported metric within tolerance at every measure. */
   auditVerifier?: string;
+  /** Extension-executed rollback check; numeric output must match the pre-iteration value before a revert is recorded. */
+  revertVerifier?: string;
+  /** Minimum measurements before keep/revert may be decided (default 1; noisy metrics should raise this). */
+  minMeasurements?: number;
   acceptancePolicy?: string;
   metricName?: string;
   metricDirection: "lower" | "higher";
@@ -377,6 +381,8 @@ export function createInitialState(
     guardCommand?: string;
     promptVerifier?: string;
     auditVerifier?: string;
+    revertVerifier?: string;
+    minMeasurements?: number;
     acceptancePolicy?: string;
     metricName?: string;
     metricDirection?: "lower" | "higher";
@@ -411,6 +417,8 @@ export function createInitialState(
     guardCommand: options.guardCommand,
     promptVerifier: options.promptVerifier,
     auditVerifier: options.auditVerifier,
+    revertVerifier: options.revertVerifier,
+    minMeasurements: options.minMeasurements,
     acceptancePolicy: options.acceptancePolicy,
     metricName: options.metricName,
     metricDirection: options.metricDirection ?? "lower",

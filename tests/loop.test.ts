@@ -580,6 +580,22 @@ describe("buildIterationContext", () => {
     expect(buildIterationContext(makeState())).not.toContain("Audit verifier");
   });
 
+  it("renders the extension-run revert verifier when configured", () => {
+    const context = buildIterationContext(makeState({
+      revertVerifier: "node revert-check.mjs",
+    }));
+    expect(context).toContain("Revert verifier (extension-run, checks rollback restored the baseline): `node revert-check.mjs`");
+  });
+
+  it("omits the revert verifier line when not configured", () => {
+    expect(buildIterationContext(makeState())).not.toContain("Revert verifier");
+  });
+
+  it("renders the min-measurements line only when raised above the default", () => {
+    expect(buildIterationContext(makeState({ minMeasurements: 3 }))).toContain("Min measurements before keep/revert: 3");
+    expect(buildIterationContext(makeState({ minMeasurements: 1 }))).not.toContain("Min measurements");
+  });
+
   it("omits protection lines when nothing is protected or pinned", () => {
     const context = buildIterationContext(makeState());
     expect(context).not.toContain("Protected files");

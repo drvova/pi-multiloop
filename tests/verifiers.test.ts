@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assessAcceptance,
+  enforceMinimumMeasurements,
   ensureRequiredChecks,
   formatVerificationChecks,
   normalizeVerificationChecks,
@@ -166,5 +167,38 @@ describe("singleMeasurementAdvisory", () => {
 
   it("does not fire for an empty measurement list, which measure rejects earlier", () => {
     expect(singleMeasurementAdvisory({ mode: "optimize" }, [])).toBeNull();
+  });
+});
+
+describe("enforceMinimumMeasurements", () => {
+  const keep = () =>
+    assessAcceptance({ mode: "optimize" }, true, []);
+
+  it("leaves acceptance untouched when the count meets the minimum", () => {
+    const acceptance = keep();
+    expect(enforceMinimumMeasurements({ mode: "optimize", minMeasurements: 3 }, acceptance, 3)).toBe(acceptance);
+    expect(enforceMinimumMeasurements({ mode: "optimize" }, acceptance, 1)).toBe(acceptance);
+  });
+
+  it("degrades keep/revert to log when the loop is undersampled", () => {
+    const enforced = enforceMinimumMeasurements(
+      { mode: "optimize", minMeasurements: 3 },
+      keep(),
+      1
+    );
+    expect(enforced.recommendedAction).toBe("log");
+    expect(enforced.acceptancePassed).toBe(false);
+    expect(enforced.acceptanceReason).toContain("Insufficient measurements");
+    expect(enforced.acceptanceReason).toContain("3");
+  });
+
+  it("does not touch log-mode loops, where the metric never gates", () => {
+    const logAcceptance = assessAcceptance({ mode: "research" }, true, []);
+    expect(enforceMinimumMeasurements({ mode: "research", minMeasurements: 3 }, logAcceptance, 1)).toBe(logAcceptance);
+  });
+
+  it("defaults the minimum to one, preserving deterministic fast paths", () => {
+    const acceptance = keep();
+    expect(enforceMinimumMeasurements({ mode: "optimize" }, acceptance, 1)).toBe(acceptance);
   });
 });

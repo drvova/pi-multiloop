@@ -83,6 +83,8 @@ export interface ActiveIteration {
   acceptanceReason?: string;
   recommendedAction?: "keep" | "revert" | "log";
   measuredAt?: string;
+  /** Verifier output captured at iterate (pre-change workspace fingerprint); a revert must reproduce it exactly. */
+  revertFingerprint?: string;
 }
 
 export interface LoopState {

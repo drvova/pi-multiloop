@@ -390,7 +390,7 @@ export function buildIterationContext(state: LoopState): string {
     lines.push(`Audit verifier (extension-run, re-checks every measure): \`${state.auditVerifier}\``);
   }
   if (state.revertVerifier) {
-    lines.push(`Revert verifier (extension-run, checks rollback restored the baseline): \`${state.revertVerifier}\``);
+    lines.push(`Revert verifier (extension-run, hashes the workspace at iterate; a revert must reproduce the pre-change fingerprint): \`${state.revertVerifier}\``);
   }
   if (state.minMeasurements && state.minMeasurements > 1) {
     lines.push(`Min measurements before keep/revert: ${state.minMeasurements}`);

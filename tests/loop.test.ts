@@ -584,7 +584,7 @@ describe("buildIterationContext", () => {
     const context = buildIterationContext(makeState({
       revertVerifier: "node revert-check.mjs",
     }));
-    expect(context).toContain("Revert verifier (extension-run, checks rollback restored the baseline): `node revert-check.mjs`");
+    expect(context).toContain("Revert verifier (extension-run, hashes the workspace at iterate; a revert must reproduce the pre-change fingerprint): `node revert-check.mjs`");
   });
 
   it("omits the revert verifier line when not configured", () => {

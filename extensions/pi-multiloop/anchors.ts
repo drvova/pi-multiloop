@@ -97,12 +97,18 @@ export function parseAuditOutput(output: string): number | null {
   return match ? Number(match[0]) : null;
 }
 
+/** First 64-hex token in command output (sha256 fingerprint), or null. */
+export function extractHash(output: string): string | null {
+  const match = output.match(/\b[a-f0-9]{64}\b/i);
+  return match ? match[0].toLowerCase() : null;
+}
+
 /**
  * Shared extension-owned command executor. The extension runs the command in
  * its own process (never through the agent) so the graded party cannot present
  * its own grade. Both the audit verifier and the revert verifier ride this.
  */
-function runVerifierCommand(cwd: string, command: string): { ok: true; output: string } | { ok: false; error: string } {
+export function runVerifierCommand(cwd: string, command: string): { ok: true; output: string } | { ok: false; error: string } {
   try {
     return {
       ok: true,
@@ -180,22 +186,28 @@ export function auditVerifierCheck(
 }
 
 /**
- * Extension-executed rollback verification: after a revert decision the
- * extension runs the configured command and compares its parsed numeric output
- * against the pre-iteration value the rollback must restore. The agent cannot
- * assert its own rollback; the workspace either matches the baseline or the
- * revert is refused.
+ * Extension-executed rollback verification. At `multiloop_iterate` the
+ * extension captures the verifier's output as the pre-change workspace
+ * fingerprint (usually a content hash of the scope). At a revert decision it
+ * runs the command again and requires the fingerprint to be reproduced
+ * exactly — the workspace must be byte-equivalent to its pre-change state,
+ * not merely metric-equivalent. The agent cannot assert its own rollback;
+ * either the fingerprint matches or the revert is refused.
  *
- * Returns null when no revert verifier is configured or there is no baseline
- * to restore against.
+ * Comparison is hash-first: when the captured fingerprint carries a 64-hex
+ * token, the current output must carry the same token (exact match, no
+ * tolerance). Legacy numeric verifiers (no hash) fall back to the numeric
+ * tolerance comparison against the pre-iteration value.
+ *
+ * Returns null when no revert verifier is configured.
  */
 export function revertVerifierCheck(
   cwd: string,
   command: string | undefined,
-  expectedBaseline: number | null
+  fingerprint: string | null | undefined,
+  legacyBaseline: number | null
 ): VerificationCheck | null {
   if (!command?.trim()) return null;
-  if (expectedBaseline === null) return null;
   const result = runVerifierCommand(cwd, command);
   if (!result.ok) {
     return {
@@ -206,7 +218,39 @@ export function revertVerifierCheck(
       evidence: `Revert verifier command failed: ${result.error}`,
     };
   }
+  const fingerprintHash = fingerprint ? extractHash(fingerprint) : null;
+  if (fingerprintHash) {
+    const currentHash = extractHash(result.output);
+    if (currentHash === null) {
+      return {
+        name: "revert-verifier",
+        kind: "mechanical",
+        passed: false,
+        command,
+        evidence: `Revert verifier produced no hash fingerprint: ${result.output.trim().slice(0, 200)}`,
+      };
+    }
+    if (currentHash === fingerprintHash) {
+      return {
+        name: "revert-verifier",
+        kind: "mechanical",
+        passed: true,
+        command,
+        evidence: `Revert verifier agreed: ${currentHash} == ${fingerprintHash} (pre-change fingerprint). Workspace restored exactly.`,
+      };
+    }
+    return {
+      name: "revert-verifier",
+      kind: "mechanical",
+      passed: false,
+      command,
+      evidence: `Revert verifier disagreement: ${currentHash} != ${fingerprintHash} (pre-change fingerprint). The workspace does not match its pre-change state.`,
+    };
+  }
+  if (legacyBaseline === null) return null;
   const parsed = parseAuditOutput(result.output);
+  const expected = fingerprint !== undefined && fingerprint !== null ? parseAuditOutput(fingerprint) : null;
+  const baseline = expected ?? legacyBaseline;
   if (parsed === null) {
     return {
       name: "revert-verifier",
@@ -216,13 +260,13 @@ export function revertVerifierCheck(
       evidence: `Revert verifier produced no numeric output: ${result.output.trim().slice(0, 200)}`,
     };
   }
-  if (matchesTolerance(parsed, expectedBaseline)) {
+  if (matchesTolerance(parsed, baseline)) {
     return {
       name: "revert-verifier",
       kind: "mechanical",
       passed: true,
       command,
-      evidence: `Revert verifier agreed: ${parsed} == ${expectedBaseline} (pre-iteration value). Rollback applied.`,
+      evidence: `Revert verifier agreed: ${parsed} == ${baseline} (pre-iteration value). Rollback applied.`,
     };
   }
   return {
@@ -230,7 +274,7 @@ export function revertVerifierCheck(
     kind: "mechanical",
     passed: false,
     command,
-    evidence: `Revert verifier disagreement: ${parsed} != ${expectedBaseline} (pre-iteration value). The workspace was not restored to its pre-iteration state.`,
+    evidence: `Revert verifier disagreement: ${parsed} != ${baseline} (pre-iteration value). The workspace was not restored to its pre-iteration state.`,
   };
 }
 

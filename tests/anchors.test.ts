@@ -9,6 +9,7 @@ import {
   protectedFileCheck,
   auditVerifierCheck,
   revertVerifierCheck,
+  extractHash,
   pinnedConfigFields,
   pinnedFieldsChanged,
   configPinRefusal,
@@ -230,47 +231,72 @@ describe("auditVerifierCheck", () => {
 });
 
 describe("revertVerifierCheck", () => {
+  const H = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const G = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+
   it("returns null when no revert command is configured", () => {
-    expect(revertVerifierCheck(cwd, undefined, 42)).toBeNull();
-    expect(revertVerifierCheck(cwd, "", 42)).toBeNull();
+    expect(revertVerifierCheck(cwd, undefined, null, 42)).toBeNull();
+    expect(revertVerifierCheck(cwd, "", null, 42)).toBeNull();
   });
 
-  it("returns null when there is no baseline to restore against", () => {
-    expect(revertVerifierCheck(cwd, "node -e \"console.log(42)\"", null)).toBeNull();
+  it("returns null in legacy mode when there is no baseline to restore against", () => {
+    expect(revertVerifierCheck(cwd, 'node -e "console.log(42)"', undefined, null)).toBeNull();
   });
 
-  it("passes when the command output matches the pre-iteration value", () => {
-    const check = revertVerifierCheck(cwd, 'node -e "console.log(42)"', 42);
+  it("passes when the current output reproduces the pre-change fingerprint exactly", () => {
+    const check = revertVerifierCheck(cwd, `node -e "console.log('${H}')"`, H, null);
     expect(check?.name).toBe("revert-verifier");
     expect(check?.kind).toBe("mechanical");
     expect(check?.passed).toBe(true);
-    expect(check?.evidence).toContain("Rollback applied");
+    expect(check?.evidence).toContain("Workspace restored exactly");
+    expect(check?.evidence).toContain(H);
   });
 
-  it("tolerates float formatting noise within the relative tolerance", () => {
-    const check = revertVerifierCheck(cwd, 'node -e "console.log(42.0000001)"', 42);
+  it("fails when the fingerprint does not match the pre-change state", () => {
+    const check = revertVerifierCheck(cwd, `node -e "console.log('${G}')"`, H, null);
+    expect(check?.passed).toBe(false);
+    expect(check?.evidence).toContain("disagreement");
+    expect(check?.evidence).toContain(H);
+    expect(check?.evidence).toContain(G);
+    expect(check?.evidence).toContain("does not match its pre-change state");
+  });
+
+  it("fails when the current output carries no hash fingerprint", () => {
+    const check = revertVerifierCheck(cwd, 'node -e "console.log(42)"', H, null);
+    expect(check?.passed).toBe(false);
+    expect(check?.evidence).toContain("no hash fingerprint");
+  });
+
+  it("extracts the fingerprint hash case-insensitively from surrounding text", () => {
+    const check = revertVerifierCheck(cwd, `node -e "console.log('HEAD is ${H.toUpperCase()} clean')"`, H, null);
     expect(check?.passed).toBe(true);
   });
 
-  it("fails when the workspace was not restored to the baseline", () => {
-    const check = revertVerifierCheck(cwd, 'node -e "console.log(42)"', 15);
-    expect(check?.passed).toBe(false);
-    expect(check?.evidence).toContain("disagreement");
-    expect(check?.evidence).toContain("42");
-    expect(check?.evidence).toContain("15");
-    expect(check?.evidence).toContain("not restored");
+  it("falls back to numeric comparison for legacy verifiers without a hash", () => {
+    expect(revertVerifierCheck(cwd, 'node -e "console.log(42)"', "42", 42)?.passed).toBe(true);
+    expect(revertVerifierCheck(cwd, 'node -e "console.log(42.0000001)"', "42", 42)?.passed).toBe(true);
+    expect(revertVerifierCheck(cwd, 'node -e "console.log(42)"', "15", 15)?.passed).toBe(false);
   });
 
-  it("fails when the command produces no numeric output", () => {
-    const check = revertVerifierCheck(cwd, 'node -e "console.log(\'no numbers here\')"', 1);
+  it("fails when the command produces no numeric output in legacy mode", () => {
+    const check = revertVerifierCheck(cwd, 'node -e "console.log(\'no numbers here\')"', "1", 1);
     expect(check?.passed).toBe(false);
     expect(check?.evidence).toContain("no numeric output");
   });
 
   it("fails loudly when the command errors", () => {
-    const check = revertVerifierCheck(cwd, 'node -e "process.exit(1)"', 1);
+    const check = revertVerifierCheck(cwd, 'node -e "process.exit(1)"', H, null);
     expect(check?.passed).toBe(false);
     expect(check?.evidence).toContain("command failed");
+  });
+});
+
+describe("extractHash", () => {
+  it("returns the first 64-hex token, lowercased", () => {
+    const h = "ab12CD" + "0".repeat(58);
+    expect(extractHash(`tree ${h} dirty`)).toBe(h.toLowerCase());
+    expect(extractHash("no hash here")).toBeNull();
+    expect(extractHash("abc123")).toBeNull();
   });
 });
 

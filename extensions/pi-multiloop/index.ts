@@ -71,6 +71,7 @@ import {
   protectedFileCheck,
   auditVerifierCheck,
   revertVerifierCheck,
+  runVerifierCommand,
   pinnedConfigFields,
   configPinRefusal,
 } from "./anchors.js";
@@ -955,7 +956,7 @@ export default function (pi: ExtensionAPI) {
       state.guardCommand ? `Guard: \`${state.guardCommand}\`` : null,
       state.promptVerifier ? `Prompt verifier: ${state.promptVerifier}` : null,
       state.auditVerifier ? `Audit verifier (extension-run, re-checks every measure): \`${state.auditVerifier}\`` : null,
-      state.revertVerifier ? `Revert verifier (extension-run, checks rollback restored the baseline): \`${state.revertVerifier}\`` : null,
+      state.revertVerifier ? `Revert verifier (extension-run, hashes the workspace at iterate; a revert must reproduce the pre-change fingerprint): \`${state.revertVerifier}\`` : null,
       state.minMeasurements && state.minMeasurements > 1 ? `Min measurements before keep/revert: ${state.minMeasurements}` : null,
       `Acceptance mode: ${state.acceptanceMode}`,
       state.scope ? `Scope: ${state.scope}` : null,
@@ -1079,6 +1080,15 @@ export default function (pi: ExtensionAPI) {
         hypothesis: params.hypothesis ?? state.activeIteration?.hypothesis,
         changes: params.changes ?? state.activeIteration?.changes,
       };
+      if (state.revertVerifier && !state.activeIteration.revertFingerprint) {
+        const fp = runVerifierCommand(ctx.cwd, state.revertVerifier);
+        if (!fp.ok) {
+          return textResult(
+            [`Cannot start iteration ${state.activeIteration.iteration} for ${formatLaneId(id)}: the revert verifier must be runnable before changes are made.`, fp.error, "Fix the verifier, then retry multiloop_iterate."].join("\n"),
+          );
+        }
+        state.activeIteration.revertFingerprint = fp.output.trim();
+      }
       saveState(ctx.cwd, id, state);
       activeStates.set(stateKey(id), state);
 
@@ -1326,7 +1336,7 @@ export default function (pi: ExtensionAPI) {
 
       let failedRevertEvidence: string | null = null;
       if (params.action === "revert" && state.revertVerifier) {
-        const revertCheck = revertVerifierCheck(ctx.cwd, state.revertVerifier, state.currentMetric);
+        const revertCheck = revertVerifierCheck(ctx.cwd, state.revertVerifier, state.activeIteration.revertFingerprint, state.currentMetric);
         if (revertCheck) {
           state.activeIteration.checks = [...(state.activeIteration.checks ?? []), revertCheck];
           if (!revertCheck.passed) {

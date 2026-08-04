@@ -332,7 +332,9 @@ export function applyDecision(
     if (decision.escalationType === "pivot") {
       state.pivotCount++;
       state.consecutiveFailures = 0;
-      appendLesson(cwd, id, `Pivot ${state.pivotCount}: Previous approach exhausted after ${PIVOT_THRESHOLD} failures.`);
+      const lesson = `Pivot ${state.pivotCount}: Previous approach exhausted after ${PIVOT_THRESHOLD} failures.`;
+      appendLesson(cwd, id, lesson);
+      state.lastLesson = lesson;
     }
   } else if (decision.action === "log") {
     state.currentMetric = measurement.median;
@@ -408,6 +410,9 @@ export function buildIterationContext(state: LoopState): string {
   }
   if (state.pinnedConfig) {
     lines.push("Loop config pinned: verifier/stop-condition fields are frozen; editing them stops the loop.");
+  }
+  if (state.lastLesson) {
+    lines.push(`Latest lesson: ${state.lastLesson}`);
   }
   if (state.maxIterations !== undefined) {
     lines.push(`Stop condition: iteration cap ${state.iteration}/${state.maxIterations}`);

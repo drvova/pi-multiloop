@@ -25,6 +25,7 @@ import {
   loadState,
   reconstructState,
   formatActionCounters,
+  readRunFiles,
 } from "./state.js";
 import {
   assessConfidence,
@@ -72,6 +73,7 @@ import {
   auditVerifierCheck,
   revertVerifierCheck,
   runVerifierCommand,
+  workspaceDriftRefusal,
   pinnedConfigFields,
   configPinRefusal,
 } from "./anchors.js";
@@ -403,6 +405,88 @@ export function buildSetupGuidePrompt(goalSeed?: string): string {
     "**Next step**",
     "- Reply go to start, or tell me what to change.",
   ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+/** Resolve a compare target ("lane" picks the latest run, "lane/run-tag" the exact one) from the registry. */
+function resolveCompareEntry(
+  registry: { loops: RegistryEntry[] },
+  target: string
+): RegistryEntry | null {
+  const trimmed = target.trim();
+  if (!trimmed) return null;
+  const exact = parseLaneId(trimmed);
+  if (exact) {
+    return registry.loops.find(
+      (l) => l.lane === exact.lane && l.runTag === exact.runTag,
+    ) ?? null;
+  }
+  return registry.loops
+    .filter((l) => l.lane === trimmed)
+    .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0] ?? null;
+}
+
+/** Read-only comparison of two runs: per-iteration series plus a champion verdict. */
+export function compareRuns(cwd: string, targetA: string, targetB: string): string {
+  const registry = readRegistry(cwd);
+  if (registry.loops.length === 0) {
+    return "No multiloop state. Run /multiloop guide to create a loop first.";
+  }
+  const entryA = resolveCompareEntry(registry, targetA);
+  const entryB = resolveCompareEntry(registry, targetB);
+  if (!entryA || !entryB) {
+    return [
+      "Could not resolve compare targets.",
+      entryA ? undefined : `  Unknown target: ${targetA}`,
+      entryB ? undefined : `  Unknown target: ${targetB}`,
+      "Use lane names or lane/run-tag pairs; run /multiloop ls --archived to list runs.",
+    ].filter((l): l is string => Boolean(l)).join("\n");
+  }
+  const dataA = readRunFiles(cwd, entryA.stateDir);
+  const dataB = readRunFiles(cwd, entryB.stateDir);
+  const lines = ["Multiloop run comparison (read-only):", ""];
+  for (const [entry, data] of [
+    [entryA, dataA],
+    [entryB, dataB],
+  ] as const) {
+    const s = data.state;
+    lines.push(`## ${entry.lane}/${entry.runTag} (${entry.status})`);
+    if (!s) {
+      lines.push("  No state.json on disk.");
+      continue;
+    }
+    lines.push(`  Mode: ${s.mode} | Metric: ${s.metricName ?? "unset"} (${s.metricDirection === "lower" ? "lower better" : "higher better"}) | Iterations: ${s.iteration}`);
+    lines.push(`  Best: ${s.bestMetric ?? "n/a"} | Current: ${s.currentMetric ?? "n/a"} | Stall streak: ${s.stallStreak ?? 0}`);
+    for (const r of data.results) {
+      const checks = r.checks?.length
+        ? ` checks ${r.checks.filter((c) => c.passed).length}/${r.checks.length}`
+        : "";
+      const delta = r.delta !== undefined
+        ? ` (${r.delta > 0 ? "+" : ""}${r.delta})`
+        : "";
+      lines.push(`  #${r.iteration} ${r.action}${r.metric !== undefined ? ` ${r.metric}${delta}` : ""}${checks}`);
+    }
+    lines.push("");
+  }
+  const champion = compareChampion(dataA.state, dataB.state);
+  if (champion) lines.push(champion);
+  return lines.join("\n");
+}
+
+/** Verdict line when both runs have a best metric; null when incomparable. */
+function compareChampion(
+  a: LoopState | null,
+  b: LoopState | null
+): string | null {
+  if (!a || !b || a.bestMetric === null || b.bestMetric === null) return null;
+  if (a.metricDirection !== b.metricDirection) return null;
+  const dir = a.metricDirection;
+  const aWins = dir === "lower" ? a.bestMetric < b.bestMetric : a.bestMetric > b.bestMetric;
+  const bWins = dir === "lower" ? b.bestMetric < a.bestMetric : b.bestMetric > a.bestMetric;
+  if (aWins === bWins) return `Champion: tie — both best at ${a.bestMetric}.`;
+  const winner = aWins ? `${a.lane}/${a.runTag}` : `${b.lane}/${b.runTag}`;
+  const best = aWins ? a.bestMetric : b.bestMetric;
+  const other = aWins ? b.bestMetric : a.bestMetric;
+  return `Champion: ${winner} (best ${best} vs ${other}) — promote by adopting its changes in a new loop.`;
 }
 
 function loopSummary(cwd: string, entry: RegistryEntry): string {
@@ -1087,6 +1171,10 @@ export default function (pi: ExtensionAPI) {
             [`Cannot start iteration ${state.activeIteration.iteration} for ${formatLaneId(id)}: the revert verifier must be runnable before changes are made.`, fp.error, "Fix the verifier, then retry multiloop_iterate."].join("\n"),
           );
         }
+        const driftRefusal = workspaceDriftRefusal(state.lastWorkspaceFingerprint, fp.output.trim());
+        if (driftRefusal) {
+          return textResult(`Cannot start iteration ${state.activeIteration.iteration} for ${formatLaneId(id)}.\n${driftRefusal}`);
+        }
         state.activeIteration.revertFingerprint = fp.output.trim();
       }
       saveState(ctx.cwd, id, state);
@@ -1353,6 +1441,15 @@ export default function (pi: ExtensionAPI) {
           ].join("\n"),
         );
       }
+
+      if (state.revertVerifier) {
+        if (params.action === "revert") {
+          state.lastWorkspaceFingerprint = state.activeIteration.revertFingerprint;
+        } else {
+          const fp = runVerifierCommand(ctx.cwd, state.revertVerifier);
+          state.lastWorkspaceFingerprint = fp.ok ? fp.output.trim() : undefined;
+        }
+      }
       const acceptanceSuffix = state.activeIteration.acceptanceReason
         ? ` (${state.activeIteration.acceptanceReason})`
         : "";
@@ -1460,6 +1557,10 @@ export default function (pi: ExtensionAPI) {
       const activeIteration = state.activeIteration;
       const metric = params.metric ?? activeIteration?.metric;
       const action = params.action ?? "log";
+      if (state.revertVerifier) {
+        const fp = runVerifierCommand(ctx.cwd, state.revertVerifier);
+        state.lastWorkspaceFingerprint = fp.ok ? fp.output.trim() : undefined;
+      }
       applyLogIteration(ctx.cwd, id, state, action, metric, params.note);
       activeStates.set(stateKey(id), state);
       updateStatus(ctx);
@@ -1673,6 +1774,19 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerTool({
+    name: "multiloop_compare",
+    label: "Multiloop Compare",
+    description: "Read-only comparison of two runs (active, paused, or archived): per-iteration series and a champion verdict. Cross-lane learning without cross-lane writes.",
+    parameters: Type.Object({
+      targetA: Type.String({ description: "First run: lane name (latest run) or lane/run-tag" }),
+      targetB: Type.String({ description: "Second run: lane name (latest run) or lane/run-tag" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      return textResult(compareRuns(ctx.cwd, params.targetA, params.targetB));
+    },
+  });
+
   function showStatus(ctx: ExtensionCommandContext) {
     const running = runningStates();
     if (running.length > 0) {
@@ -1860,6 +1974,20 @@ export default function (pi: ExtensionAPI) {
       if (trimmed === "archive" || trimmed.startsWith("archive ")) {
         const archiveArgs = trimmed.replace(/^archive\s*/, "").trim();
         await archiveHandler(archiveArgs, ctx);
+        return;
+      }
+
+      if (trimmed === "compare" || trimmed.startsWith("compare ")) {
+        const targets = trimmed.replace(/^compare\s*/, "").trim().split(/\s+/).filter(Boolean);
+        if (targets.length !== 2) {
+          ctx.ui.notify("Usage: /multiloop compare <targetA> <targetB> — lane names or lane/run-tag pairs.", "error");
+          return;
+        }
+        pi.sendMessage({
+          customType: "multiloop-compare",
+          content: compareRuns(ctx.cwd, targets[0], targets[1]),
+          display: true,
+        });
         return;
       }
 

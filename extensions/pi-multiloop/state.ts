@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, appendFileSync, existsSync, openSync, closeSync, fsyncSync, renameSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { type LaneId, laneDir, ensureLaneDir } from "./lanes.js";
 
 export interface VerificationCheck {
@@ -108,6 +108,10 @@ export interface LoopState {
   stallStreak?: number;
   /** Durable auto-continue intent: a continuation was queued and not yet delivered. */
   pendingContinue?: { reason: string; queuedAt: string };
+  /** Latest pivot lesson, rendered into iteration context so pivots inform the next approach. */
+  lastLesson?: string;
+  /** Workspace fingerprint as of the last recorded decision; the next iterate must reproduce it (edits outside an iteration are refused). */
+  lastWorkspaceFingerprint?: string;
   status: "running" | "paused" | "completed" | "stopped" | "archived";
   verifyCommand: string;
   guardCommand?: string;
@@ -222,6 +226,29 @@ export function readResults(cwd: string, id: LaneId): IterationResult[] {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+}
+
+/** Read state and results from an arbitrary stateDir (active, paused, or archived) without touching it. */
+export function readRunFiles(
+  cwd: string,
+  stateDir: string
+): { state: LoopState | null; results: IterationResult[] } {
+  const dir = resolve(cwd, stateDir);
+  let state: LoopState | null = null;
+  const statePath = join(dir, STATE_FILE);
+  if (existsSync(statePath)) {
+    state = JSON.parse(readFileSync(statePath, "utf-8"));
+  }
+  let results: IterationResult[] = [];
+  const resultsFile = join(dir, RESULTS_FILE);
+  if (existsSync(resultsFile)) {
+    results = readFileSync(resultsFile, "utf-8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  }
+  return { state, results };
 }
 
 export function readResultsSince(
@@ -351,6 +378,7 @@ export function reconstructState(cwd: string, id: LaneId): LoopState | null {
   state.bestMetric = bestMetric;
   state.consecutiveFailures = consecutiveFailures;
   state.stallStreak = stallStreak(results);
+  state.lastLesson = latestLesson(cwd, id) ?? undefined;
   if (sawEscalationMetadata) {
     state.pivotCount = Math.max(state.pivotCount ?? 0, replayedPivotCount);
   }
@@ -373,6 +401,16 @@ export function readLessons(cwd: string, id: LaneId): string {
   const path = lessonsPath(cwd, id);
   if (!existsSync(path)) return "";
   return readFileSync(path, "utf-8");
+}
+
+/** Latest lesson line (timestamp prefix stripped), or null when none exists. */
+export function latestLesson(cwd: string, id: LaneId): string | null {
+  const lines = readLessons(cwd, id)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+  return lines[lines.length - 1].replace(/^- \[.*?\] /, "");
 }
 
 export function createInitialState(

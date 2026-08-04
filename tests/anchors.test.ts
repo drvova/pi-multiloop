@@ -10,6 +10,7 @@ import {
   auditVerifierCheck,
   revertVerifierCheck,
   extractHash,
+  workspaceDriftRefusal,
   pinnedConfigFields,
   pinnedFieldsChanged,
   configPinRefusal,
@@ -335,5 +336,22 @@ describe("configPinRefusal", () => {
     expect(loaded.protectedBaseline).toEqual(state.protectedBaseline);
     expect(loaded.pinnedConfig).toEqual(state.pinnedConfig);
     expect(pinnedFieldsChanged(loaded)).toEqual([]);
+  });
+});
+
+describe("workspaceDriftRefusal", () => {
+  it("allows the first iteration when no prior fingerprint exists", () => {
+    expect(workspaceDriftRefusal(undefined, "abc123")).toBeNull();
+    expect(workspaceDriftRefusal(null, "abc123")).toBeNull();
+  });
+
+  it("allows the iteration when the workspace fingerprint is unchanged", () => {
+    expect(workspaceDriftRefusal("fp-v1", "fp-v1")).toBeNull();
+  });
+
+  it("refuses when the workspace changed since the last recorded decision", () => {
+    const refusal = workspaceDriftRefusal("fp-v1", "fp-v2");
+    expect(refusal).toContain("Workspace changed since the last recorded decision");
+    expect(refusal).toContain("call multiloop_iterate first");
   });
 });

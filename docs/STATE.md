@@ -54,6 +54,8 @@ The snapshot also records iteration metrics:
 - `consecutiveFailures`: count used for escalation.
 - `pivotCount`: number of pivots used.
 - `stallStreak`: count of trailing identical results (same changes+metric). Reached 3, it is rendered as a stall warning in every continuation prompt — repetition without progress is a distinct signal from failure (adapted from pizza's identical-tool-round stall guard).
+- `lastLesson`: the most recent pivot lesson, rendered into every continuation prompt as `Latest lesson: ...` so a pivot actually informs the next approach (previously lessons were appended to `lessons.md` and never surfaced). Recomputed from `lessons.md` on every state reconstruction.
+- `lastWorkspaceFingerprint`: the revert-verifier fingerprint of the workspace as of the last recorded decision (keep/revert/log). The next `multiloop_iterate` captures the fingerprint again before changes are made and refuses to start if it differs — edits outside an iteration boundary would otherwise make the revert fingerprint capture an already-dirty baseline, so a later revert would be verified against the wrong state. Cleared when the verifier cannot run (fingerprint unavailable); an explicit revert records the pre-change fingerprint as the new boundary.
 - `pendingContinue`: durable auto-continue intent `{ reason, queuedAt }`. Set when a continuation follow-up is queued, cleared on delivery, and cleared on pause/stop/archive/suspend/resume. Survives process death between queueing and delivery: `session_start` re-arms continuation for lanes still carrying it.
 - `protectedPaths` / `protectedBaseline`: frozen-file protection. `protectedPaths` lists repo-relative files/directories the loop may not modify; `protectedBaseline` is their content-hash snapshot from loop start. Every `multiloop_measure` re-hashes and injects a failing `protected-files` mechanical check on any drift, so acceptance blocks the keep. Enforcement is measurement, not permission: the extension has no write hook, so a changed file is caught at measure time rather than prevented.
 - `auditVerifier`: extension-executed verification command (never run through the agent). At every `multiloop_measure` the extension runs it in its own process, parses its numeric output, and compares it against the reported measurement median (relative tolerance `1e-6`, catching fabricated or stale reports while tolerating float formatting noise). The verdict is injected as a mechanical `audit-verifier` check and recorded in `results.jsonl`, so a keep blocks when the report does not match ground truth. It is pinned like the other verifier fields, so the loop cannot rewrite what audits it.
@@ -179,6 +181,16 @@ Result:
 - Registry: `archived`
 - Snapshot: `archived`
 - Runtime: detached
+
+### Compare: `/multiloop compare <targetA> <targetB>` and `multiloop_compare`
+
+Read-only cross-run learning. Resolves each target as a lane name (latest run by start time) or `lane/run-tag` pair, reads `state.json` + `results.jsonl` through the registry's `stateDir` (active, paused, completed, and archived runs all work), and renders:
+
+- Per-run header: mode, metric name and direction, iteration count, best/current metric, stall streak, status.
+- Per-iteration series: `#N action metric (delta)` plus a `checks passed/total` suffix when checks were recorded.
+- A champion verdict when both runs have a best metric and the same direction: `Champion: lane/run-tag (best X vs Y)` — cross-lane learning without cross-lane writes (single-worktree north star).
+
+Corrupt `results.jsonl` or `state.json` fails loudly rather than guessing. Compare never writes: it exists so the champion-challenger pattern can be evaluated offline against frozen historical runs without ever running two variants at once.
 
 ### Delete: `/multiloop rm <lane/run-tag>`
 

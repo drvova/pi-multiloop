@@ -602,6 +602,14 @@ describe("buildIterationContext", () => {
     expect(context).not.toContain("Loop config pinned");
   });
 
+  it("renders the latest pivot lesson when one is recorded", () => {
+    expect(buildIterationContext(makeState({ lastLesson: "Pivot 1: Previous approach exhausted after 5 failures." }))).toContain("Latest lesson: Pivot 1: Previous approach exhausted");
+  });
+
+  it("omits the lesson line when none is recorded", () => {
+    expect(buildIterationContext(makeState())).not.toContain("Latest lesson");
+  });
+
   it("warns about a stall when the streak passes the threshold", () => {
     const below = makeState({ stallStreak: 2 });
     expect(buildIterationContext(below)).not.toContain("Stalled");

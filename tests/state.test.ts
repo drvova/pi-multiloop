@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -11,6 +11,8 @@ import {
   reconstructState,
   appendLesson,
   readLessons,
+  latestLesson,
+  readRunFiles,
   createInitialState,
   stallStreak,
   isStalled,
@@ -465,5 +467,42 @@ describe("pendingContinue intent", () => {
 
     const rebuilt = reconstructState(cwd, id);
     expect(rebuilt!.pendingContinue?.reason).toBe("compaction-resume");
+  });
+});
+
+describe("latestLesson", () => {
+  it("returns null when no lessons exist", () => {
+    expect(latestLesson(cwd, id)).toBeNull();
+  });
+
+  it("returns the final lesson with the timestamp prefix stripped", () => {
+    appendLesson(cwd, id, "Loop unrolling didn't help");
+    appendLesson(cwd, id, "Vectorization improved by 15%");
+    expect(latestLesson(cwd, id)).toBe("Vectorization improved by 15%");
+    expect(latestLesson(cwd, id)).not.toContain("- [");
+  });
+});
+
+describe("readRunFiles", () => {
+  it("reads state and results from an arbitrary stateDir without touching it", () => {
+    const dir = join(cwd, ".multiloop", "archive", "2026-08-03-perf-run-001");
+    mkdirSync(dir, { recursive: true });
+    const state = createInitialState(id, "optimize", "make bench");
+    writeFileSync(join(dir, "state.json"), JSON.stringify(state));
+    writeFileSync(join(dir, "results.jsonl"), [
+      JSON.stringify({ iteration: 1, timestamp: new Date().toISOString(), action: "keep", metric: 95, delta: -5, baseline: 100 }),
+      JSON.stringify({ iteration: 2, timestamp: new Date().toISOString(), action: "keep", metric: 90, delta: -5, baseline: 95 }),
+    ].join("\n") + "\n");
+
+    const { state: loadedState, results } = readRunFiles(cwd, dir.slice(cwd.length + 1));
+    expect(loadedState?.lane).toBe(id.lane);
+    expect(results.map((r) => r.metric)).toEqual([95, 90]);
+    expect(readdirSync(dir)).toHaveLength(2);
+  });
+
+  it("returns null state when state.json is missing", () => {
+    const dir = join(cwd, ".multiloop", "archive", "empty");
+    mkdirSync(dir, { recursive: true });
+    expect(readRunFiles(cwd, dir.slice(cwd.length + 1)).state).toBeNull();
   });
 });

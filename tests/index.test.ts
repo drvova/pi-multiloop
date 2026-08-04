@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { buildAutoContinuePrompt, buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, buildSetupGuidePrompt, buildTargetDisambiguationPrompt, colorizeResumableLoopsNotice, decideCompactionResumeTiming, formatLoopList, formatLoopStatusOverview } from "../extensions/pi-multiloop/index.js";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { buildAutoContinuePrompt, buildCompactionResumePrompt, buildExplicitResumePrompt, buildResumableLoopsNotice, buildSetupGuidePrompt, buildTargetDisambiguationPrompt, colorizeResumableLoopsNotice, decideCompactionResumeTiming, formatLoopList, formatLoopStatusOverview, compareRuns } from "../extensions/pi-multiloop/index.js";
 import { createInitialState } from "../extensions/pi-multiloop/state.js";
+import { readRegistry, writeRegistry } from "../extensions/pi-multiloop/lanes.js";
 import type { RegistryEntry } from "../extensions/pi-multiloop/lanes.js";
 
 function activeState() {
@@ -284,5 +288,113 @@ describe("buildCompactionResumePrompt", () => {
 
     expect(prompt).not.toContain("Compaction entry:");
     expect(prompt).not.toContain("undefined");
+  });
+});
+
+
+describe("compareRuns", () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    cwd = mkdtempSync(join(tmpdir(), "multiloop-index-"));
+  });
+  afterEach(() => {
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  function writeRun(
+    lane: string,
+    runTag: string,
+    status: "active" | "completed" | "archived",
+    startedAt: string,
+    overrides: Record<string, unknown>,
+    results: Array<Record<string, unknown>>
+  ) {
+    const stateDir = status === "archived"
+      ? join(".multiloop", "archive", `${startedAt}-${lane}-${runTag}`)
+      : join(".multiloop", "active", lane, runTag);
+    const dir = join(cwd, stateDir);
+    mkdirSync(dir, { recursive: true });
+    const state = createInitialState({ lane, runTag }, "optimize", "make bench", {
+      metricDirection: "lower",
+      metricName: "latency",
+    });
+    writeFileSync(join(dir, "state.json"), JSON.stringify({ ...state, ...overrides }));
+    writeFileSync(join(dir, "results.jsonl"), results.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const registry = readRegistry(cwd);
+    registry.loops.push({ lane, runTag, mode: "optimize", status, startedAt, stateDir });
+    writeRegistry(cwd, registry);
+  }
+
+  function result(iteration: number, action: string, metric: number, delta: number) {
+    return { iteration, timestamp: "2026-08-03T00:00:00Z", action, metric, delta, baseline: metric - delta };
+  }
+
+  it("reports no state when the registry is empty", () => {
+    expect(compareRuns(cwd, "perf", "mem")).toContain("No multiloop state.");
+  });
+
+  it("names unknown targets and hints at listing runs", () => {
+    writeRun("perf", "run-001", "completed", "2026-08-01T00:00:00Z", { bestMetric: 90 }, [result(1, "keep", 95, -5)]);
+    const out = compareRuns(cwd, "perf", "nope");
+    expect(out).toContain("Unknown target: nope");
+    expect(out).toContain("/multiloop ls --archived");
+  });
+
+  it("renders both per-iteration series and a champion verdict", () => {
+    writeRun("perf", "run-001", "completed", "2026-08-01T00:00:00Z", { baseline: 100, currentMetric: 90, bestMetric: 90, iteration: 2 }, [
+      result(1, "keep", 95, -5),
+      result(2, "keep", 90, -5),
+    ]);
+    writeRun("mem", "run-001", "completed", "2026-08-01T00:00:00Z", { baseline: 100, currentMetric: 96, bestMetric: 96, iteration: 1 }, [
+      result(1, "keep", 96, -4),
+    ]);
+    const out = compareRuns(cwd, "perf", "mem");
+    expect(out).toContain("## perf/run-001 (completed)");
+    expect(out).toContain("## mem/run-001 (completed)");
+    expect(out).toContain("#1 keep 95 (-5)");
+    expect(out).toContain("#2 keep 90 (-5)");
+    expect(out).toContain("Champion: perf/run-001 (best 90 vs 96)");
+  });
+
+  it("resolves a lane-only target to the latest run by startedAt", () => {
+    writeRun("perf", "run-001", "completed", "2026-08-01T00:00:00Z", { bestMetric: 90 }, [result(1, "keep", 90, -10)]);
+    writeRun("perf", "run-002", "completed", "2026-08-02T00:00:00Z", { bestMetric: 85 }, [result(1, "keep", 85, -5)]);
+    const out = compareRuns(cwd, "perf", "perf/run-001");
+    expect(out).toContain("#1 keep 85 (-5)");
+    expect(out).toContain("Champion: perf/run-002 (best 85 vs 90)");
+  });
+
+  it("reads archived runs through their registry stateDir", () => {
+    writeRun("perf", "run-001", "archived", "2026-08-01T00:00:00Z", { bestMetric: 88 }, [result(1, "keep", 88, -12)]);
+    writeRun("perf", "run-002", "completed", "2026-08-02T00:00:00Z", { bestMetric: 90 }, [result(1, "keep", 90, -10)]);
+    const out = compareRuns(cwd, "perf/run-001", "perf/run-002");
+    expect(out).toContain("## perf/run-001 (archived)");
+    expect(out).toContain("#1 keep 88 (-12)");
+  });
+
+  it("reports a tie when best metrics match", () => {
+    writeRun("perf", "run-001", "completed", "2026-08-01T00:00:00Z", { bestMetric: 90 }, [result(1, "keep", 90, -10)]);
+    writeRun("mem", "run-001", "completed", "2026-08-01T00:00:00Z", { bestMetric: 90 }, [result(1, "keep", 90, -10)]);
+    expect(compareRuns(cwd, "perf", "mem")).toContain("Champion: tie — both best at 90.");
+  });
+
+  it("omits the champion line when either run has no best metric", () => {
+    writeRun("perf", "run-001", "active", "2026-08-01T00:00:00Z", { bestMetric: null, baseline: null }, []);
+    writeRun("mem", "run-001", "completed", "2026-08-01T00:00:00Z", { bestMetric: 90 }, [result(1, "keep", 90, -10)]);
+    const out = compareRuns(cwd, "perf", "mem");
+    expect(out).not.toContain("Champion:");
+  });
+
+  it("fails loudly on a corrupt results file instead of guessing", () => {
+    writeRun("perf", "run-001", "completed", "2026-08-01T00:00:00Z", { bestMetric: 90 }, [result(1, "keep", 90, -10)]);
+    const stateDir = join(cwd, ".multiloop", "active", "mem", "run-001");
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, "state.json"), JSON.stringify(createInitialState({ lane: "mem", runTag: "run-001" }, "optimize", "make bench")));
+    writeFileSync(join(stateDir, "results.jsonl"), "{not json}\n");
+    const registry = readRegistry(cwd);
+    registry.loops.push({ lane: "mem", runTag: "run-001", mode: "optimize", status: "active", startedAt: "2026-08-01T00:00:00Z", stateDir: join(".multiloop", "active", "mem", "run-001") });
+    writeRegistry(cwd, registry);
+    expect(() => compareRuns(cwd, "perf", "mem")).toThrow();
   });
 });

@@ -36,6 +36,9 @@ pi-multiloop gives each loop its own **lane** so they can run side by side witho
 - **Independent re-verification** — optional `auditVerifier` command that the extension itself executes at every measure (never the agent), compares its numeric output against the reported metric, and blocks acceptance on disagreement — the graded party cannot present its own grade
 - **Rollback verified, not asserted** — optional `revertVerifier` command the extension runs at iterate to fingerprint the workspace (content hash), then re-runs at revert: the fingerprint must be reproduced byte-for-byte or the revert is refused. The workspace must actually be restored to its pre-change state, on the extension's word — a coincidentally unchanged metric proves nothing
 - **No more deciding on a coin flip** — optional `minMeasurements` (default 1) raises how many runs must back a keep/revert; undersampled loops degrade to log instead of promoting on noise (deterministic metrics keep the fast path)
+- **Out-of-band edits refused** — when a `revertVerifier` is configured, the extension fingerprints the workspace at every decision boundary; editing files outside an iteration is detected at the next `multiloop_iterate` and stops the line, so a revert can never be verified against a dirty baseline
+- **Pivots actually teach** — the latest pivot lesson is rendered into every continuation prompt instead of disappearing into a `lessons.md` nobody reads
+- **Champion comparison** — `multiloop_compare` (or `/multiloop compare perf mem`) renders two runs side by side with a champion verdict, reading archived runs too: offline champion-challenger evaluation on frozen history, with zero cross-lane writes
 
 ## Install
 

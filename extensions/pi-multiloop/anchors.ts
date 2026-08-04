@@ -305,3 +305,25 @@ export function configPinRefusal(cwd: string, id: LaneId): string | null {
     "Refusing to proceed.",
   ].join("\n");
 }
+
+/**
+ * Refuse to start an iteration when the workspace changed since the last
+ * recorded decision. The fingerprint captured at iterate must equal the one
+ * captured when the previous iteration concluded; any difference means files
+ * were edited outside an iteration boundary — the exact cheat the fingerprint
+ * protocol exists to stop (a revert would then verify against a dirty
+ * baseline). Returns a refusal message, or null when nothing drifted.
+ */
+export function workspaceDriftRefusal(
+  lastFingerprint: string | null | undefined,
+  currentFingerprint: string
+): string | null {
+  if (!lastFingerprint) return null;
+  if (lastFingerprint === currentFingerprint) return null;
+  return [
+    "Workspace changed since the last recorded decision, before an iteration was started.",
+    "Edits are only allowed inside an iteration: call multiloop_iterate first, then change files.",
+    "The revert verifier fingerprints the workspace at iterate; a dirty baseline would let a revert be verified against the wrong state.",
+    "Undo the out-of-band changes, or if they are intentional, start a new loop to adopt them as the new baseline.",
+  ].join("\n");
+}

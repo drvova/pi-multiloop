@@ -310,8 +310,13 @@ describe("compareRuns", () => {
     overrides: Record<string, unknown>,
     results: Array<Record<string, unknown>>
   ) {
+    // Production archiveLoop sanitizes : and . out of the timestamp (Windows
+    // forbids those in path segments), so archived dirs here must match: the
+    // same sanitized name is used for the mkdir and the registry entry, or
+    // compareRuns resolves a stateDir that was never created on Windows.
+    const stamp = startedAt.replace(/[:.]/g, "-");
     const stateDir = status === "archived"
-      ? join(".multiloop", "archive", `${startedAt}-${lane}-${runTag}`)
+      ? join(".multiloop", "archive", `${stamp}-${lane}-${runTag}`)
       : join(".multiloop", "active", lane, runTag);
     const dir = join(cwd, stateDir);
     mkdirSync(dir, { recursive: true });

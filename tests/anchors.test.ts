@@ -412,7 +412,7 @@ describe("captureBoundaryFingerprint", () => {
   });
 
   it("refuses loudly when the verifier cannot run", () => {
-    const result = captureBoundaryFingerprint(cwd, "node -e 'process.exit(1)'");
+    const result = captureBoundaryFingerprint(cwd, 'node -e "process.exit(1)"');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.length).toBeGreaterThan(0);
   });

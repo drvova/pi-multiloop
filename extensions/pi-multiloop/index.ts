@@ -72,6 +72,7 @@ import {
   protectedFileCheck,
   auditVerifierCheck,
   revertVerifierCheck,
+  builtinRevertCheck,
   runVerifierCommand,
   workspaceDriftRefusal,
   captureBoundaryFingerprint,
@@ -1441,8 +1442,10 @@ export default function (pi: ExtensionAPI) {
       const baseline = state.currentMetric ?? state.baseline!;
 
       let failedRevertEvidence: string | null = null;
-      if (params.action === "revert" && state.revertVerifier) {
-        const revertCheck = revertVerifierCheck(ctx.cwd, state.revertVerifier, state.activeIteration.revertFingerprint, state.currentMetric);
+      if (params.action === "revert") {
+        const revertCheck = state.revertVerifier
+          ? revertVerifierCheck(ctx.cwd, state.revertVerifier, state.activeIteration.revertFingerprint, state.currentMetric)
+          : builtinRevertCheck(ctx.cwd, state.activeIteration.revertFingerprint);
         if (revertCheck) {
           state.activeIteration.checks = [...(state.activeIteration.checks ?? []), revertCheck];
           if (!revertCheck.passed) {

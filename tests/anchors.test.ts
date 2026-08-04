@@ -10,6 +10,7 @@ import {
   protectedFileCheck,
   auditVerifierCheck,
   revertVerifierCheck,
+  builtinRevertCheck,
   extractHash,
   workspaceDriftRefusal,
   captureBoundaryFingerprint,
@@ -352,6 +353,11 @@ describe("workspaceDriftRefusal", () => {
     expect(workspaceDriftRefusal("fp-v1", "fp-v1")).toBeNull();
   });
 
+  it("treats an empty-string boundary (clean tree) as a real boundary", () => {
+    expect(workspaceDriftRefusal("", "M tracked.txt")).toContain("Workspace changed");
+    expect(workspaceDriftRefusal("", "")).toBeNull();
+  });
+
   it("refuses when the workspace changed since the last recorded boundary", () => {
     const refusal = workspaceDriftRefusal("fp-v1", "fp-v2");
     expect(refusal).toContain("Workspace changed since the last recorded boundary");
@@ -403,5 +409,55 @@ describe("captureBoundaryFingerprint", () => {
     const result = captureBoundaryFingerprint(cwd, "node -e 'process.exit(1)'");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.length).toBeGreaterThan(0);
+  });
+});
+
+describe("builtinRevertCheck", () => {
+  const makeRepo = () => {
+    const repo = mkdtempSync(join(tmpdir(), tmpPrefix("rvrepo")));
+    execSync("git init -q", { cwd: repo });
+    execSync("git -c user.email=t@t -c user.name=t commit --allow-empty -q -m seed", { cwd: repo });
+    writeFileSync(join(repo, "tracked.txt"), "v1");
+    execSync("git add tracked.txt", { cwd: repo });
+    execSync("git -c user.email=t@t -c user.name=t commit -q -m add", { cwd: repo });
+    return repo;
+  };
+
+  it("returns null when there is no pre-change fingerprint", () => {
+    expect(builtinRevertCheck(cwd, null)).toBeNull();
+    expect(builtinRevertCheck(cwd, undefined)).toBeNull();
+  });
+
+  it("passes when the tracked working tree matches the pre-change fingerprint", () => {
+    const repo = makeRepo();
+    try {
+      const pre = captureBoundaryFingerprint(repo, undefined);
+      expect(pre.ok).toBe(true);
+      if (!pre.ok || pre.fingerprint === null) throw new Error("no fingerprint");
+      const check = builtinRevertCheck(repo, pre.fingerprint);
+      expect(check?.passed).toBe(true);
+      expect(check?.name).toBe("revert-verifier");
+      if (check) expect(check.evidence).toContain("agreed");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a revert when the tree drifted from the pre-change fingerprint", () => {
+    const repo = makeRepo();
+    try {
+      const pre = captureBoundaryFingerprint(repo, undefined);
+      expect(pre.ok).toBe(true);
+      if (!pre.ok || pre.fingerprint === null) throw new Error("no fingerprint");
+      writeFileSync(join(repo, "tracked.txt"), "v2");
+      const check = builtinRevertCheck(repo, pre.fingerprint);
+      expect(check?.passed).toBe(false);
+      if (check) {
+        expect(check.evidence).toContain("disagreement");
+        expect(check.evidence).toContain("M tracked.txt");
+      }
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

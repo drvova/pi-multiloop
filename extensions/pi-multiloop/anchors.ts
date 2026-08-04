@@ -278,6 +278,47 @@ export function revertVerifierCheck(
   };
 }
 
+/**
+ * Builtin revert verification for loops without a configured revertVerifier.
+ * The pre-change fingerprint captured at iterate was the built-in git
+ * working-tree state; an explicit revert must reproduce it exactly or the
+ * revert is refused. Returns null when no pre-change fingerprint exists (no
+ * git at iterate time — parity degrades to the lazy next-iterate check).
+ */
+export function builtinRevertCheck(
+  cwd: string,
+  fingerprint: string | null | undefined
+): VerificationCheck | null {
+  if (fingerprint === null || fingerprint === undefined) return null;
+  const result = runVerifierCommand(cwd, BUILTIN_FINGERPRINT_COMMAND);
+  if (!result.ok) {
+    return {
+      name: "revert-verifier",
+      kind: "mechanical",
+      passed: false,
+      command: BUILTIN_FINGERPRINT_COMMAND,
+      evidence: "Revert verifier (built-in) could not run; the workspace rollback was not verified.",
+    };
+  }
+  const current = result.output.trim();
+  if (current === fingerprint) {
+    return {
+      name: "revert-verifier",
+      kind: "mechanical",
+      passed: true,
+      command: BUILTIN_FINGERPRINT_COMMAND,
+      evidence: "Revert verifier (built-in) agreed: the tracked working tree matches its pre-change state exactly.",
+    };
+  }
+  return {
+    name: "revert-verifier",
+    kind: "mechanical",
+    passed: false,
+    command: BUILTIN_FINGERPRINT_COMMAND,
+    evidence: `Revert verifier (built-in) disagreement: the tracked working tree does not match its pre-change state. Live: ${current.slice(0, 200) || "(clean)"}`,
+  };
+}
+
 /** Names of pinned fields whose current value differs from the stored pin. */
 export function pinnedFieldsChanged(state: LoopState): string[] {
   const pinned = state.pinnedConfig;
@@ -318,7 +359,7 @@ export function workspaceDriftRefusal(
   lastFingerprint: string | null | undefined,
   currentFingerprint: string
 ): string | null {
-  if (!lastFingerprint) return null;
+  if (lastFingerprint === null || lastFingerprint === undefined) return null;
   if (lastFingerprint === currentFingerprint) return null;
   return [
     "Workspace changed since the last recorded boundary (loop start or decision), before an iteration was started.",

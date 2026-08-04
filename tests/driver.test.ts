@@ -12,6 +12,7 @@ import {
   shouldContinue,
   buildIterationPrompt,
   cleanChildEnv,
+  probePi,
   spawnIteration,
   stopIteration,
   iterationAdvanced,
@@ -169,6 +170,19 @@ describe("multiloop-run driver", () => {
     expect(cleaned.PI_SESSION_ID).toBeUndefined();
     expect(cleaned.PI_INTERCOM_SESSION_ID).toBeUndefined();
     expect(cleaned.PATH).toBe("/bin");
+  });
+
+  it("probes the pi binary and accepts any response (existing executable)", () => {
+    const probe = probePi(process.execPath); // `node --help` responds, non-zero exit is fine
+    expect(probe.ok).toBe(true);
+    expect(probe.error).toBeNull();
+  });
+
+  it("fails the probe for a missing pi binary with a spawn error", () => {
+    const probe = probePi("/nonexistent/pi-xyz-please-do-not-exist");
+    expect(probe.ok).toBe(false);
+    expect(probe.error).toContain("/nonexistent/pi-xyz-please-do-not-exist");
+    expect(probe.error).not.toContain("probe timeout"); // spawn failure, not a hang
   });
 
   it("polls for the iteration to advance and reaps the child group", async () => {

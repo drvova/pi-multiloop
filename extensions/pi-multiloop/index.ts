@@ -1064,7 +1064,7 @@ export default function (pi: ExtensionAPI) {
       state.targetMetric !== undefined
         ? `Stop condition: ${state.metricName ?? "metric"} target ${state.metricDirection === "lower" ? "<=" : ">="} ${state.targetMetric}`
         : null,
-      state.maxIterations === undefined && state.targetMetric === undefined
+      state.maxIterations == null && state.targetMetric == null
         ? "Stop condition: run until paused, stopped, or escalation exhaustion"
         : null,
       `Goal: ${state.goal ?? ""}`,

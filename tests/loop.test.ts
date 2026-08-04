@@ -377,6 +377,29 @@ describe("checkStopCondition", () => {
     expect(checkStopCondition(makeState({ iteration: 999 }))).toBeNull();
   });
 
+  it("treats a literal null stop-condition field as absent (hand-edited state)", () => {
+    // A hand-written state.json with "maxIterations": null must not coerce
+    // null to 0 and complete the loop at iteration 0; same for targetMetric
+    // with a measured metric. Pins normalize absent -> null, so this matches
+    // the pinned-config representation.
+    // null is a legit on-disk value for these number fields even though the
+    // typed surface says number | undefined
+    const nullState = (overrides: Record<string, unknown>) =>
+      makeState(overrides as unknown as LoopState);
+    expect(checkStopCondition(nullState({ iteration: 0, maxIterations: null }))).toBeNull();
+    expect(checkStopCondition(nullState({ iteration: 5, maxIterations: null }))).toBeNull();
+    expect(checkStopCondition(nullState({
+      currentMetric: 2,
+      targetMetric: null,
+      metricDirection: "higher",
+    }))).toBeNull();
+    expect(checkStopCondition(nullState({
+      currentMetric: 0,
+      targetMetric: null,
+      metricDirection: "lower",
+    }))).toBeNull();
+  });
+
   it("reports the iteration cap once reached", () => {
     const stop = checkStopCondition(makeState({ iteration: 10, maxIterations: 10 }));
     expect(stop?.kind).toBe("max-iterations");

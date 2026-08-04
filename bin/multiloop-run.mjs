@@ -29,7 +29,7 @@
 //   --verbose         Print per-iteration output
 // Exit codes: 0 completed/stopped, 1 error/stuck, 2 usage.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, existsSync, writeFileSync, renameSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -59,6 +59,26 @@ export function cleanChildEnv(env) {
   delete clean.PI_SESSION_ID;
   delete clean.PI_INTERCOM_SESSION_ID;
   return clean;
+}
+
+export function probePi(piCmd) {
+  // The probe exists to catch a missing/unexecutable pi binary early — not to
+  // validate its flags, so any nonzero status counts as "pi responded". Only a
+  // spawn error (ENOENT/EACCES) or a hang is a hard failure.
+  let output = "";
+  try {
+    const r = spawnSync(piCmd, ["--help"], { encoding: "utf8", timeout: 15000 });
+    output = String(r.stdout || "") + String(r.stderr || "");
+    if (r.error) {
+      return { ok: false, output, error: r.error.message };
+    }
+    if (r.status === null) {
+      return { ok: false, output, error: `${piCmd} --help was killed by the 15000ms probe timeout` };
+    }
+    return { ok: true, output, error: null };
+  } catch (e) {
+    return { ok: false, output, error: String(e && e.message ? e.message : e) };
+  }
 }
 
 export function readRegistry(repo) {
@@ -211,6 +231,15 @@ export async function main() {
     console.error(`No loop found for lane '${opts.lane}'${opts.runTag ? ` run '${opts.runTag}'` : ""} in ${repo}.multiloop/registry.json`);
     return 1;
   }
+  if (!opts.dryRun) {
+    const probe = probePi(opts.piCmd);
+    if (!probe.ok) {
+      console.error(`multiloop-run: cannot run pi binary '${opts.piCmd}' (${probe.error}). Install pi or pass --pi-cmd <path>.`);
+      if (probe.output.trim()) console.error(probe.output.trim().slice(0, 400));
+      return 1;
+    }
+  }
+
   let state = pauseLoop(repo, entry, readLoopState(repo, entry));
   let driven = 0;
   while (driven < opts.iterations) {

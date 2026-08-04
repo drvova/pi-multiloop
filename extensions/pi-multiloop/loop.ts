@@ -152,14 +152,14 @@ export function checkEscalation(
  * message after the loop has already been marked complete.
  */
 export function checkStopCondition(state: LoopState): StopCondition | null {
-  if (state.maxIterations !== undefined && state.iteration >= state.maxIterations) {
+  if (state.maxIterations != null && state.iteration >= state.maxIterations) {
     return {
       kind: "max-iterations",
       message: `Reached the configured iteration cap (${state.iteration}/${state.maxIterations}).`,
     };
   }
 
-  if (state.targetMetric !== undefined && state.currentMetric !== null) {
+  if (state.targetMetric != null && state.currentMetric !== null) {
     const reached = state.metricDirection === "lower"
       ? state.currentMetric <= state.targetMetric
       : state.currentMetric >= state.targetMetric;
@@ -417,10 +417,10 @@ export function buildIterationContext(state: LoopState): string {
   if (state.lastLesson) {
     lines.push(`Latest lesson: ${state.lastLesson}`);
   }
-  if (state.maxIterations !== undefined) {
+  if (state.maxIterations != null) {
     lines.push(`Stop condition: iteration cap ${state.iteration}/${state.maxIterations}`);
   }
-  if (state.targetMetric !== undefined) {
+  if (state.targetMetric != null) {
     lines.push(`Stop condition: ${state.metricName ?? "metric"} target ${state.metricDirection === "lower" ? "<=" : ">="} ${state.targetMetric}`);
   }
 

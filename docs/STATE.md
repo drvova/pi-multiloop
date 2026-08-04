@@ -270,7 +270,7 @@ pi-multiloop intentionally refuses or redirects some actions rather than guessin
 
 ### Stop conditions
 
-`maxIterations` and `targetMetric` are optional fields on the loop snapshot, set once by `multiloop_start` and never mutated afterwards. Both terminal paths — `multiloop_decide` (via `applyDecision`) and `multiloop_log` — evaluate them through `completeIfStopConditionMet` before persisting state, so the check cannot be bypassed by mode.
+`maxIterations` and `targetMetric` are optional fields on the loop snapshot, set once by `multiloop_start` and never mutated afterwards. A literal `null` in a hand-edited `state.json` is treated as absent — the guards are nullish (`!= null`), matching the pinned-config normalization, so `"targetMetric": null` can never coerce to a target of 0 and complete the loop at first measure. Both terminal paths — `multiloop_decide` (via `applyDecision`) and `multiloop_log` — evaluate them through `completeIfStopConditionMet` before persisting state, so the check cannot be bypassed by mode.
 
 | Field | Semantics |
 |---|---|

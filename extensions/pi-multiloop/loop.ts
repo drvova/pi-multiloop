@@ -386,6 +386,9 @@ export function buildIterationContext(state: LoopState): string {
   if (state.promptVerifier) {
     lines.push(`Prompt verifier: ${state.promptVerifier}`);
   }
+  if (state.auditVerifier) {
+    lines.push(`Audit verifier (extension-run, re-checks every measure): \`${state.auditVerifier}\``);
+  }
   if (state.acceptancePolicy) {
     lines.push(`Acceptance policy: ${state.acceptancePolicy}`);
   } else if (state.guardCommand || state.promptVerifier) {

@@ -33,6 +33,7 @@ pi-multiloop gives each loop its own **lane** so they can run side by side witho
 - **Durable intent** — a queued continuation survives a crash between queue and delivery
 - **Frozen anchors** — declare files the loop must never modify (`protectedPaths`); their content is hash-verified at every measure, so acceptance blocks a keep if the optimizer touched them
 - **Config pinning** — the verifier and stop-condition fields are pinned at start; editing them mid-loop stops the line and names the tampered field
+- **Independent re-verification** — optional `auditVerifier` command that the extension itself executes at every measure (never the agent), compares its numeric output against the reported metric, and blocks acceptance on disagreement — the graded party cannot present its own grade
 
 ## Install
 

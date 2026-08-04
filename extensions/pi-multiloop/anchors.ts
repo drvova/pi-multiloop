@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { resolve } from "node:path";
 import { loadState, type LoopState, type VerificationCheck } from "./state.js";
 import type { LaneId } from "./lanes.js";
@@ -69,11 +70,92 @@ export function pinnedConfigFields(state: LoopState): Record<string, unknown> {
     verifyCommand: state.verifyCommand,
     guardCommand: state.guardCommand ?? null,
     promptVerifier: state.promptVerifier ?? null,
+    auditVerifier: state.auditVerifier ?? null,
     metricName: state.metricName ?? null,
     metricDirection: state.metricDirection,
     targetMetric: state.targetMetric ?? null,
     maxIterations: state.maxIterations ?? null,
     protectedPaths: state.protectedPaths ?? [],
+  };
+}
+
+/**
+ * Relative tolerance for audit-verifier agreement: catches fabricated or stale
+ * reports while tolerating float formatting noise (42 vs 42.0). A real lie is
+ * orders of magnitude past this; a formatting quirk never is.
+ */
+export const AUDIT_TOLERANCE = 1e-6;
+
+/** Timeout for the extension-run audit command; a hung audit is a failed audit. */
+export const AUDIT_TIMEOUT_MS = 120_000;
+
+/** First numeric token in command output, or null when none exists. */
+export function parseAuditOutput(output: string): number | null {
+  const match = output.match(/-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+/**
+ * Extension-executed re-verification: runs the audit command in its own
+ * process (never through the agent) and compares its parsed numeric output
+ * against the reported measurement median. The executor is the extension, so
+ * the graded party cannot present its own grade (NIST grounded-verdict
+ * principle).
+ *
+ * Returns null when no audit command is configured; otherwise a check whose
+ * pass/fail is recorded in results.jsonl so the verdict has immutable
+ * provenance.
+ */
+export function auditVerifierCheck(
+  cwd: string,
+  command: string | undefined,
+  reportedMedian: number
+): VerificationCheck | null {
+  if (!command?.trim()) return null;
+  let output: string;
+  try {
+    output = execSync(command, {
+      cwd,
+      encoding: "utf8",
+      shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+      timeout: AUDIT_TIMEOUT_MS,
+    });
+  } catch (err) {
+    return {
+      name: "audit-verifier",
+      kind: "mechanical",
+      passed: false,
+      command,
+      evidence: `Audit verifier command failed: ${(err as Error).message.split("\n")[0] ?? String(err)}`,
+    };
+  }
+  const parsed = parseAuditOutput(output);
+  if (parsed === null) {
+    return {
+      name: "audit-verifier",
+      kind: "mechanical",
+      passed: false,
+      command,
+      evidence: `Audit verifier produced no numeric output: ${output.trim().slice(0, 200)}`,
+    };
+  }
+  const scale = Math.max(1, Math.abs(parsed), Math.abs(reportedMedian));
+  const matches = Math.abs(parsed - reportedMedian) <= AUDIT_TOLERANCE * scale;
+  if (matches) {
+    return {
+      name: "audit-verifier",
+      kind: "mechanical",
+      passed: true,
+      command,
+      evidence: `Audit verifier agreed: ${parsed} == ${reportedMedian} (reported measurement)`,
+    };
+  }
+  return {
+    name: "audit-verifier",
+    kind: "mechanical",
+    passed: false,
+    command,
+    evidence: `Audit verifier disagreement: ${parsed} (extension-run) != ${reportedMedian} (reported measurement). The report does not match ground truth.`,
   };
 }
 

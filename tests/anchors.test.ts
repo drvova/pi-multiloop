@@ -7,6 +7,7 @@ import {
   MISSING_FILE_HASH,
   snapshotProtectedHashes,
   protectedFileCheck,
+  auditVerifierCheck,
   pinnedConfigFields,
   pinnedFieldsChanged,
   configPinRefusal,
@@ -30,11 +31,12 @@ afterEach(() => {
   rmSync(cwd, { recursive: true, force: true });
 });
 
-function anchoredState(protectedPaths: string[] = ["bench.mjs"]) {
+function anchoredState(protectedPaths: string[] = ["bench.mjs"], auditVerifier?: string) {
   const state = createInitialState(id, "optimize", "node bench.mjs", {
     guardCommand: "npm test",
     targetMetric: 10,
     protectedPaths,
+    auditVerifier,
   });
   state.protectedBaseline = snapshotProtectedHashes(cwd, state.protectedPaths ?? []);
   state.pinnedConfig = pinnedConfigFields(state);
@@ -117,8 +119,10 @@ describe("pinnedConfigFields", () => {
     const fields = pinnedConfigFields(state);
     expect(fields.guardCommand).toBeNull();
     expect(fields.promptVerifier).toBeNull();
+    expect(fields.auditVerifier).toBeNull();
     expect(fields.protectedPaths).toEqual([]);
     expect(Object.keys(fields).sort()).toEqual([
+      "auditVerifier",
       "guardCommand",
       "maxIterations",
       "metricDirection",
@@ -128,6 +132,12 @@ describe("pinnedConfigFields", () => {
       "targetMetric",
       "verifyCommand",
     ]);
+  });
+
+  it("pins the audit verifier command when configured", () => {
+    const state = anchoredState([], "node audit.mjs");
+    expect(state.auditVerifier).toBe("node audit.mjs");
+    expect(pinnedConfigFields(state).auditVerifier).toBe("node audit.mjs");
   });
 });
 
@@ -157,6 +167,53 @@ describe("pinnedFieldsChanged", () => {
     state.targetMetric = 10;
     state.protectedPaths = [];
     expect(pinnedFieldsChanged(state)).toEqual(["protectedPaths"]);
+  });
+
+  it("names audit-verifier tampering", () => {
+    const state = anchoredState([], "node audit.mjs");
+    state.auditVerifier = "node tuned-audit.mjs";
+    expect(pinnedFieldsChanged(state)).toEqual(["auditVerifier"]);
+  });
+});
+
+describe("auditVerifierCheck", () => {
+  it("returns null when no audit command is configured", () => {
+    expect(auditVerifierCheck(cwd, undefined, 42)).toBeNull();
+    expect(auditVerifierCheck(cwd, "", 42)).toBeNull();
+  });
+
+  it("passes when the command output matches the reported median", () => {
+    const check = auditVerifierCheck(cwd, 'node -e "console.log(42)"', 42);
+    expect(check?.name).toBe("audit-verifier");
+    expect(check?.kind).toBe("mechanical");
+    expect(check?.passed).toBe(true);
+    expect(check?.evidence).toContain("agreed");
+    expect(check?.evidence).toContain("42");
+  });
+
+  it("tolerates float formatting noise within the relative tolerance", () => {
+    const check = auditVerifierCheck(cwd, 'node -e "console.log(42.0000001)"', 42);
+    expect(check?.passed).toBe(true);
+  });
+
+  it("fails when the reported median disagrees with ground truth", () => {
+    const check = auditVerifierCheck(cwd, 'node -e "console.log(42)"', 15);
+    expect(check?.passed).toBe(false);
+    expect(check?.evidence).toContain("disagreement");
+    expect(check?.evidence).toContain("42");
+    expect(check?.evidence).toContain("15");
+  });
+
+  it("fails when the command produces no numeric output", () => {
+    const check = auditVerifierCheck(cwd, 'node -e "console.log(\'no numbers here\')"', 1);
+    expect(check?.passed).toBe(false);
+    expect(check?.evidence).toContain("no numeric output");
+  });
+
+  it("fails loudly when the command errors", () => {
+    const check = auditVerifierCheck(cwd, 'node -e "process.exit(1)"', 1);
+    expect(check?.passed).toBe(false);
+    expect(check?.evidence).toContain("command failed");
   });
 });
 

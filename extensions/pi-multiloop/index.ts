@@ -68,6 +68,7 @@ import {
 import {
   snapshotProtectedHashes,
   protectedFileCheck,
+  auditVerifierCheck,
   pinnedConfigFields,
   configPinRefusal,
 } from "./anchors.js";
@@ -377,7 +378,7 @@ export function buildSetupGuidePrompt(goalSeed?: string): string {
     "Setup contract summary (the canonical version lives with the multiloop skill at `references/LOOP_GUIDE.md`):",
     "1. Scan the repo before proposing a loop: inspect structure, manifests/scripts/configs, tests/benches, and relevant TODO/plan files. Do not edit files during setup.",
     "2. Ask at least one repo-grounded clarification round before launch, even if the request seems obvious. Prefer concrete defaults and multiple-choice questions.",
-    "3. Infer and confirm: goal, mode, lane, scope, protected files, metric name, metric direction, acceptance mode, verify command, guard command, prompt verifier, acceptance policy, stop condition/iteration cap, and rollback safety.",
+    "3. Infer and confirm: goal, mode, lane, scope, protected files, audit verifier, metric name, metric direction, acceptance mode, verify command, guard command, prompt verifier, acceptance policy, stop condition/iteration cap, and rollback safety.",
     "4. Respect the two-phase launch boundary: all clarification before explicit go/start/launch; after approval, continue autonomously until stopped, paused, completed, or blocked.",
     "5. For punchlists, default to acceptanceMode=log with open_or_partial_items lower-is-better progress; use keep-revert only when the user confirms a metric optimization goal plus rollback safety.",
     "6. For compound goals like performance improves while output remains correct, configure a metric verify command plus mechanical/prompt checks. Acceptance should be: metric improves and every check passes.",
@@ -881,6 +882,7 @@ export default function (pi: ExtensionAPI) {
     verifyCommand: string;
     guardCommand?: string;
     promptVerifier?: string;
+    auditVerifier?: string;
     acceptancePolicy?: string;
     metricName?: string;
     metricDirection?: "lower" | "higher";
@@ -900,6 +902,7 @@ export default function (pi: ExtensionAPI) {
     const state = createInitialState(id, config.mode, config.verifyCommand, {
       guardCommand: config.guardCommand,
       promptVerifier: config.promptVerifier,
+      auditVerifier: config.auditVerifier,
       acceptancePolicy,
       metricName: config.metricName,
       metricDirection: config.metricDirection ?? MODES[config.mode].defaultDirection,
@@ -945,7 +948,7 @@ export default function (pi: ExtensionAPI) {
       `Verify: \`${state.verifyCommand}\``,
       state.guardCommand ? `Guard: \`${state.guardCommand}\`` : null,
       state.promptVerifier ? `Prompt verifier: ${state.promptVerifier}` : null,
-      state.acceptancePolicy ? `Acceptance: ${state.acceptancePolicy}` : null,
+      state.auditVerifier ? `Audit verifier (extension-run, re-checks every measure): \`${state.auditVerifier}\`` : null,
       state.metricName ? `Metric: ${state.metricName} (${state.metricDirection})` : `Metric direction: ${state.metricDirection}`,
       `Acceptance mode: ${state.acceptanceMode}`,
       state.scope ? `Scope: ${state.scope}` : null,
@@ -978,7 +981,7 @@ export default function (pi: ExtensionAPI) {
     runTag: Type.Optional(Type.String({ description: "Run tag (auto-generated if omitted)" })),
     guardCommand: Type.Optional(Type.String({ description: "Optional pass/fail guard command" })),
     promptVerifier: Type.Optional(Type.String({ description: "Optional prompt-based correctness verifier / review criterion" })),
-    acceptancePolicy: Type.Optional(Type.String({ description: "Acceptance rule, e.g. metric improves and all checks pass" })),
+    auditVerifier: Type.Optional(Type.String({ description: "Optional extension-executed verification command; its numeric output must match the reported metric within tolerance at every measure. Guards against fabricated or stale reports." })),
     metricName: Type.Optional(Type.String({ description: "Metric name" })),
     metricDirection: Type.Optional(Type.Union([Type.Literal("lower"), Type.Literal("higher")], { description: "Whether lower or higher metric values are better" })),
     acceptanceMode: Type.Optional(Type.Union([Type.Literal("log"), Type.Literal("keep-revert")], { description: "Acceptance behavior: log/progress or optimize-style keep/revert" })),
@@ -1142,7 +1145,10 @@ export default function (pi: ExtensionAPI) {
       const confidence = assessConfidence(params.measurements);
       const normalized = ensureRequiredChecks(state, normalizeVerificationChecks(params.checks));
       const protectedCheck = protectedFileCheck(ctx.cwd, state.protectedPaths, state.protectedBaseline);
-      const checks = protectedCheck ? [...normalized, protectedCheck] : normalized;
+      const checks = [...normalized];
+      if (protectedCheck) checks.push(protectedCheck);
+      const auditCheck = auditVerifierCheck(ctx.cwd, state.auditVerifier, confidence.median);
+      if (auditCheck) checks.push(auditCheck);
 
       if (state.baseline === null) {
         const baselineStop = establishBaseline(ctx.cwd, id, state, confidence.median);

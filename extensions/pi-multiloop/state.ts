@@ -110,6 +110,8 @@ export interface LoopState {
   verifyCommand: string;
   guardCommand?: string;
   promptVerifier?: string;
+  /** Extension-executed verification command; numeric output must match the reported metric within tolerance at every measure. */
+  auditVerifier?: string;
   acceptancePolicy?: string;
   metricName?: string;
   metricDirection: "lower" | "higher";
@@ -374,6 +376,7 @@ export function createInitialState(
   options: {
     guardCommand?: string;
     promptVerifier?: string;
+    auditVerifier?: string;
     acceptancePolicy?: string;
     metricName?: string;
     metricDirection?: "lower" | "higher";
@@ -407,6 +410,7 @@ export function createInitialState(
     verifyCommand,
     guardCommand: options.guardCommand,
     promptVerifier: options.promptVerifier,
+    auditVerifier: options.auditVerifier,
     acceptancePolicy: options.acceptancePolicy,
     metricName: options.metricName,
     metricDirection: options.metricDirection ?? "lower",

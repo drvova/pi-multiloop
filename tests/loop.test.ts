@@ -569,6 +569,17 @@ describe("buildIterationContext", () => {
     expect(context).toContain("Loop config pinned");
   });
 
+  it("renders the extension-run audit verifier when configured", () => {
+    const context = buildIterationContext(makeState({
+      auditVerifier: "node audit.mjs",
+    }));
+    expect(context).toContain("Audit verifier (extension-run, re-checks every measure): `node audit.mjs`");
+  });
+
+  it("omits the audit verifier line when not configured", () => {
+    expect(buildIterationContext(makeState())).not.toContain("Audit verifier");
+  });
+
   it("omits protection lines when nothing is protected or pinned", () => {
     const context = buildIterationContext(makeState());
     expect(context).not.toContain("Protected files");

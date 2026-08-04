@@ -158,6 +158,7 @@ node bin/multiloop-run.mjs <repo> <lane> [<runTag>] --iterations N
 - Exits `0` when the loop completes or the iteration cap is reached, `1` on a stuck session or driver error, `2` on usage errors.
 - Flags: `--iterations N` (cap), `--timeout-sec` (per-iteration, default 900), `--pi-cmd` (override), `--dry-run` (print the prompt, spawn nothing), `--verbose`.
 - The driver leaves the loop `running` when it stops early — pick it up interactively or drive it again.
+- A human `/multiloop stop` or `/multiloop pause` takes effect **between** sessions: the running headless child finishes its pending iteration and records it, and the driver exits at the next stop-condition check.
 
 ## Composability
 

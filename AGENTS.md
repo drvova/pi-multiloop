@@ -76,10 +76,13 @@ npx vitest run
 | `tests/lifecycle.test.ts` | integration | Full run across a simulated restart |
 | `tests/scenarios.test.ts` | integration | Multi-lane, upgrade path, registry desync, hand-edited state |
 | `tests/mode.test.ts` | unit + property | Loop-mode decisions: input classification, decision replay, arming, continuation gate |
-| `tests/sessions.test.ts` | simulation | Whole session lifecycles across restarts, including a 60-turn randomised horizon |
+| `tests/sessions.test.ts` | simulation | Whole session lifecycles across restarts, including a 60-turn randomised horizon for durable intent + stall bookkeeping |
+| `tests/longhorizon-env.test.ts` | simulation | The same 60-turn horizon replayed under 5 simulated platforms; a mocked Windows filesystem EPERMs on dir fsync to prove the guard skips it on win32 and runs it on POSIX |
 | `tests/exhaustive.test.ts` | enumeration | Cross-product of the decision space vs `tests/support/oracle.ts` |
 | `tests/properties.test.ts` | property | Invariants over seeded random histories on the real filesystem |
 | `tests/metamorphic.test.ts` | metamorphic | Relations between related inputs |
+
+`tests/support/session-harness.ts` is the shared Session simulator used by `sessions.test.ts` and `longhorizon-env.test.ts`. It mirrors the index.ts wiring (session_start arms from recorded decision plus disk; tools arm the per-turn flag; agent_end asks `shouldQueueContinuation`) and is composition-only — every decision goes through the production function.
 
 `tests/support/oracle.ts` is an independent model of the stop-condition contract, written from README/STATE.md rather than from `loop.ts`. Keep it that way: if it is ever derived from the implementation, the exhaustive suite stops proving anything.
 

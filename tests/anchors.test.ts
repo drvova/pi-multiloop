@@ -355,6 +355,7 @@ describe("workspaceDriftRefusal", () => {
 
   it("treats an empty-string boundary (clean tree) as a real boundary", () => {
     expect(workspaceDriftRefusal("", "M tracked.txt")).toContain("Workspace changed");
+    expect(workspaceDriftRefusal("", "M tracked.txt")).toContain("Live workspace state: M tracked.txt");
     expect(workspaceDriftRefusal("", "")).toBeNull();
   });
 
@@ -362,6 +363,11 @@ describe("workspaceDriftRefusal", () => {
     const refusal = workspaceDriftRefusal("fp-v1", "fp-v2");
     expect(refusal).toContain("Workspace changed since the last recorded boundary");
     expect(refusal).toContain("call multiloop_iterate first");
+    expect(refusal).toContain("Live workspace state: fp-v2");
+  });
+
+  it("renders an explicit (clean) marker when the live state is empty", () => {
+    expect(workspaceDriftRefusal("fp-v1", "")).toContain("Live workspace state: (clean)");
   });
 });
 

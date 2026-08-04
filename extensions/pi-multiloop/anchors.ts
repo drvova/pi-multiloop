@@ -366,6 +366,7 @@ export function workspaceDriftRefusal(
     "Edits are only allowed inside an iteration: call multiloop_iterate first, then change files.",
     "The revert verifier fingerprints the workspace at iterate; a dirty baseline would let a revert be verified against the wrong state.",
     "Undo the out-of-band changes, or if they are intentional, start a new loop to fold them into the new baseline.",
+    `Live workspace state: ${currentFingerprint || "(clean)"}`,
   ].join("\n");
 }
 

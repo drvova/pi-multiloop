@@ -161,14 +161,6 @@ node bin/multiloop-run.mjs <repo> <lane> [<runTag>] --iterations N
 - The driver leaves the loop `running` when it stops early — pick it up interactively or drive it again.
 - A human `/multiloop stop` or `/multiloop pause` takes effect **between** sessions: the running headless child finishes its pending iteration and records it, and the driver exits at the next stop-condition check.
 
-## Composability
-
-Works alongside other Pi extensions:
-
-- **pi-boomerang** — context compression for long loops
-- **pi-supervisor** — goal enforcement and steering
-- **pi-review-loop** — quality gates between iterations
-
 ## Development
 
 ```bash

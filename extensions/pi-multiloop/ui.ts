@@ -1,12 +1,13 @@
+import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
+import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { LoopState } from "./state.js";
 import { confidenceLabel } from "./metrics.js";
-
 export interface DashboardRow {
   lane: string;
   runTag: string;
   mode: string;
   iteration: number;
-  status: string;
+  status: LoopState["status"];
   metric: string;
   best: string;
   delta: string;
@@ -46,11 +47,23 @@ function formatPct(
   return `${diff >= 0 ? "+" : ""}${pct}%${improved ? " +" : ""}`;
 }
 
-export function formatDashboardText(rows: DashboardRow[]): string[] {
-  if (rows.length === 0) return ["No active loops."];
+const MAX_DASHBOARD_ROWS = 8;
 
-  const lines: string[] = [];
-  lines.push(
+const STATUS_COLORS: Record<LoopState["status"], ThemeColor> = {
+  running: "success",
+  paused: "warning",
+  completed: "muted",
+  stopped: "error",
+  archived: "dim",
+};
+
+const PLAIN_THEME: Pick<Theme, "fg"> = {
+  fg: (_color: ThemeColor, text: string) => text,
+};
+
+function dashboardHeader(theme: Pick<Theme, "fg">): string {
+  return theme.fg(
+    "muted",
     padRight("LANE", 12) +
       padRight("MODE", 10) +
       padRight("ITER", 6) +
@@ -61,23 +74,51 @@ export function formatDashboardText(rows: DashboardRow[]): string[] {
       padRight("FAIL", 5) +
       "PIV"
   );
-  lines.push("─".repeat(77));
+}
 
-  for (const r of rows) {
-    lines.push(
-      padRight(r.lane, 12) +
-        padRight(r.mode, 10) +
-        padRight(String(r.iteration), 6) +
-        padRight(r.status, 10) +
-        padRight(r.metric, 12) +
-        padRight(r.best, 12) +
-        padRight(r.delta, 10) +
-        padRight(String(r.failures), 5) +
-        String(r.pivots)
-    );
+function dashboardRowLine(row: DashboardRow, theme: Pick<Theme, "fg">): string {
+  const failures =
+    row.failures > 0
+      ? theme.fg("warning", padRight(String(row.failures), 5))
+      : padRight(String(row.failures), 5);
+  return (
+    theme.fg("accent", padRight(row.lane, 12)) +
+      padRight(row.mode, 10) +
+      padRight(String(row.iteration), 6) +
+      theme.fg(STATUS_COLORS[row.status], padRight(row.status, 10)) +
+      padRight(row.metric, 12) +
+      padRight(row.best, 12) +
+      padRight(row.delta, 10) +
+      failures +
+      String(row.pivots)
+  );
+}
+
+/**
+ * Theme-aware dashboard rendering used by the live widget.
+ * Pads cells before coloring so ANSI escapes never shift columns.
+ */
+export function formatDashboardWidgetText(
+  rows: DashboardRow[],
+  theme: Pick<Theme, "fg">
+): string[] {
+  if (rows.length === 0) {
+    return [theme.fg("muted", "multiloop: idle — no active loops")];
   }
+  return [
+    dashboardHeader(theme),
+    theme.fg("muted", "─".repeat(77)),
+    ...rows.map((row) => dashboardRowLine(row, theme)),
+  ];
+}
 
-  return lines;
+export function formatDashboardText(rows: DashboardRow[]): string[] {
+  if (rows.length === 0) return ["No active loops."];
+  return [
+    dashboardHeader(PLAIN_THEME),
+    PLAIN_THEME.fg("muted", "─".repeat(77)),
+    ...rows.map((row) => dashboardRowLine(row, PLAIN_THEME)),
+  ];
 }
 
 function padRight(str: string, len: number): string {
@@ -110,6 +151,34 @@ export function formatLoopSummary(state: LoopState): string[] {
   if (state.pivotCount > 0) {
     lines.push(`Pivots: ${state.pivotCount}/2`);
   }
-
   return lines;
+}
+
+/**
+ * Live loop-dashboard widget: a pi extension widget (ctx.ui.setWidget factory
+ * form) whose render() pulls the current loop states on every paint, so the
+ * dashboard stays live across repaints and state mutations. The caller re-arms
+ * it through setWidget on every state change.
+ */
+export function createLiveDashboardWidget(
+  getStates: () => LoopState[],
+  theme: Pick<Theme, "fg">
+): Component {
+  return {
+    render(width: number): string[] {
+      const states = getStates();
+      const rows = buildDashboardRows(states);
+      const lines =
+        rows.length > 0
+          ? formatDashboardWidgetText(rows.slice(0, MAX_DASHBOARD_ROWS), theme)
+          : formatDashboardWidgetText([], theme);
+      if (rows.length > MAX_DASHBOARD_ROWS) {
+        lines.push(theme.fg("muted", `… ${rows.length - MAX_DASHBOARD_ROWS} more; run /multiloop status`));
+      }
+      return lines.map((line) => truncateToWidth(line, Math.max(8, width)));
+    },
+    invalidate(): void {
+      // No cached rendering state; every paint reads the live states.
+    },
+  };
 }

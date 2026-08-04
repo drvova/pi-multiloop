@@ -62,7 +62,15 @@ import {
   normalizeVerificationChecks,
   singleMeasurementAdvisory,
 } from "./verifiers.js";
-
+import {
+  createLiveDashboardWidget,
+} from "./ui.js";
+import {
+  snapshotProtectedHashes,
+  protectedFileCheck,
+  pinnedConfigFields,
+  configPinRefusal,
+} from "./anchors.js";
 const activeStates = new Map<string, LoopState>();
 const COMPACTION_RESUME_RECENT_MS = 5000;
 /** Last known workspace cwd, captured at session_start for input-event saves. */
@@ -369,7 +377,7 @@ export function buildSetupGuidePrompt(goalSeed?: string): string {
     "Setup contract summary (the canonical version lives with the multiloop skill at `references/LOOP_GUIDE.md`):",
     "1. Scan the repo before proposing a loop: inspect structure, manifests/scripts/configs, tests/benches, and relevant TODO/plan files. Do not edit files during setup.",
     "2. Ask at least one repo-grounded clarification round before launch, even if the request seems obvious. Prefer concrete defaults and multiple-choice questions.",
-    "3. Infer and confirm: goal, mode, lane, scope, metric name, metric direction, acceptance mode, verify command, guard command, prompt verifier, acceptance policy, stop condition/iteration cap, and rollback safety.",
+    "3. Infer and confirm: goal, mode, lane, scope, protected files, metric name, metric direction, acceptance mode, verify command, guard command, prompt verifier, acceptance policy, stop condition/iteration cap, and rollback safety.",
     "4. Respect the two-phase launch boundary: all clarification before explicit go/start/launch; after approval, continue autonomously until stopped, paused, completed, or blocked.",
     "5. For punchlists, default to acceptanceMode=log with open_or_partial_items lower-is-better progress; use keep-revert only when the user confirms a metric optimization goal plus rollback safety.",
     "6. For compound goals like performance improves while output remains correct, configure a metric verify command plus mechanical/prompt checks. Acceptance should be: metric improves and every check passes.",
@@ -878,6 +886,7 @@ export default function (pi: ExtensionAPI) {
     metricDirection?: "lower" | "higher";
     acceptanceMode?: "log" | "keep-revert";
     scope?: string;
+    protectedPaths?: string[];
     maxIterations?: number;
     targetMetric?: number;
   }
@@ -897,10 +906,15 @@ export default function (pi: ExtensionAPI) {
       acceptanceMode: config.acceptanceMode ?? MODES[config.mode].defaultAcceptanceMode,
       scope: config.scope,
       goal: config.goal,
+      protectedPaths: config.protectedPaths,
       maxIterations: config.maxIterations,
       targetMetric: config.targetMetric,
     });
 
+    if (state.protectedPaths?.length) {
+      state.protectedBaseline = snapshotProtectedHashes(ctx.cwd, state.protectedPaths);
+    }
+    state.pinnedConfig = pinnedConfigFields(state);
     ensureLaneDir(ctx.cwd, id);
     saveState(ctx.cwd, id, state);
 
@@ -935,7 +949,9 @@ export default function (pi: ExtensionAPI) {
       state.metricName ? `Metric: ${state.metricName} (${state.metricDirection})` : `Metric direction: ${state.metricDirection}`,
       `Acceptance mode: ${state.acceptanceMode}`,
       state.scope ? `Scope: ${state.scope}` : null,
-      state.maxIterations !== undefined ? `Stop condition: iteration cap ${state.maxIterations}` : null,
+      state.protectedPaths?.length
+        ? `Protected files (hash-verified every iteration): ${state.protectedPaths.join(', ')}`
+        : null,
       state.targetMetric !== undefined
         ? `Stop condition: ${state.metricName ?? "metric"} target ${state.metricDirection === "lower" ? "<=" : ">="} ${state.targetMetric}`
         : null,
@@ -967,6 +983,7 @@ export default function (pi: ExtensionAPI) {
     metricDirection: Type.Optional(Type.Union([Type.Literal("lower"), Type.Literal("higher")], { description: "Whether lower or higher metric values are better" })),
     acceptanceMode: Type.Optional(Type.Union([Type.Literal("log"), Type.Literal("keep-revert")], { description: "Acceptance behavior: log/progress or optimize-style keep/revert" })),
     scope: Type.Optional(Type.String({ description: "Files/directories in scope" })),
+    protectedPaths: Type.Optional(Type.Array(Type.String(), { description: "Files/directories (repo-relative) the loop must never modify; content-hash-verified at every measure" })),
     maxIterations: Type.Optional(Type.Integer({
       minimum: 1,
       description: "Stop condition: complete the loop after this many iterations. Omit to run until paused/stopped.",
@@ -1015,6 +1032,11 @@ export default function (pi: ExtensionAPI) {
 
       if (!state) {
         return textResult(`No active loop in lane "${id.lane}". Use /multiloop to start one.`);
+      }
+
+      const pinRefusal = configPinRefusal(ctx.cwd, id);
+      if (pinRefusal) {
+        return textResult(pinRefusal);
       }
 
       if (shouldReanchor(state.iteration)) {
@@ -1104,12 +1126,23 @@ export default function (pi: ExtensionAPI) {
         return textResult(`No state for lane "${params.lane}".`);
       }
 
+      const pinRefusal = configPinRefusal(ctx.cwd, id);
+      if (pinRefusal) {
+        return textResult(pinRefusal);
+      }
+
       if (params.measurements.length === 0) {
         return textResult("At least one measurement is required. Run the verify command and pass its numeric result to multiloop_measure.");
       }
 
+      if (state.protectedPaths?.length && !state.protectedBaseline) {
+        // Hand-created loops: capture the frozen-file baseline on first use.
+        state.protectedBaseline = snapshotProtectedHashes(ctx.cwd, state.protectedPaths);
+      }
       const confidence = assessConfidence(params.measurements);
-      const checks = ensureRequiredChecks(state, normalizeVerificationChecks(params.checks));
+      const normalized = ensureRequiredChecks(state, normalizeVerificationChecks(params.checks));
+      const protectedCheck = protectedFileCheck(ctx.cwd, state.protectedPaths, state.protectedBaseline);
+      const checks = protectedCheck ? [...normalized, protectedCheck] : normalized;
 
       if (state.baseline === null) {
         const baselineStop = establishBaseline(ctx.cwd, id, state, confidence.median);
@@ -1219,6 +1252,11 @@ export default function (pi: ExtensionAPI) {
       let state = activeStates.get(stateKey(id));
       if (!state) {
         return textResult(`No state for lane "${params.lane}".`);
+      }
+
+      const pinRefusal = configPinRefusal(ctx.cwd, id);
+      if (pinRefusal) {
+        return textResult(pinRefusal);
       }
 
       if (state.currentMetric === null && state.baseline === null) {
@@ -1362,6 +1400,12 @@ export default function (pi: ExtensionAPI) {
       if (!state) {
         return textResult(`No state for lane "${params.lane}".`);
       }
+
+      const pinRefusal = configPinRefusal(ctx.cwd, id);
+      if (pinRefusal) {
+        return textResult(pinRefusal);
+      }
+
 
       const activeIteration = state.activeIteration;
       const metric = params.metric ?? activeIteration?.metric;
@@ -1860,6 +1904,20 @@ export default function (pi: ExtensionAPI) {
     return null;
   }
 
+  function refreshLoopWidget(ctx: ExtensionContext | ExtensionCommandContext) {
+    if (!ctx.hasUI) return;
+    if (activeStates.size === 0) {
+      ctx.ui.setWidget("multiloop-live", undefined);
+      return;
+    }
+    ctx.ui.setWidget(
+      "multiloop-live",
+      (_tui, theme) =>
+        createLiveDashboardWidget(() => Array.from(activeStates.values()), theme),
+      { placement: "belowEditor" }
+    );
+  }
+
   function updateStatus(ctx: ExtensionContext | ExtensionCommandContext) {
     if (activeStates.size > 0) {
       const summaries = Array.from(activeStates.values()).map(
@@ -1870,6 +1928,7 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.setStatus("multiloop", undefined);
     }
 
+    refreshLoopWidget(ctx);
     clearResumableLoopsWidget(ctx);
   }
 }

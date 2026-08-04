@@ -395,7 +395,7 @@ export function buildIterationContext(state: LoopState): string {
     lines.push(`Revert verifier (extension-run, hashes the workspace at iterate; a revert must reproduce the pre-change fingerprint): \`${state.revertVerifier}\``);
   }
   if (state.lastWorkspaceFingerprint) {
-    lines.push("Workspace boundary pinned: edits outside an iteration are refused (fingerprint drift gate).");
+    lines.push(`Workspace boundary pinned ${state.revertVerifier ? "" : "(built-in git fingerprint)"}: edits outside an iteration are refused (fingerprint drift gate).`);
   }
   if (state.minMeasurements && state.minMeasurements > 1) {
     lines.push(`Min measurements before keep/revert: ${state.minMeasurements}`);

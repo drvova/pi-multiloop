@@ -592,7 +592,7 @@ describe("buildIterationContext", () => {
   });
 
   it("renders the pinned workspace boundary when a fingerprint exists", () => {
-    expect(buildIterationContext(makeState({ lastWorkspaceFingerprint: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" }))).toContain("Workspace boundary pinned: edits outside an iteration are refused");
+    expect(buildIterationContext(makeState({ lastWorkspaceFingerprint: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" }))).toContain("Workspace boundary pinned (built-in git fingerprint): edits outside an iteration are refused");
   });
 
   it("omits the boundary line when no fingerprint is recorded", () => {

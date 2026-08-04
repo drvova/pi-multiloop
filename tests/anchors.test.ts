@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -11,7 +12,8 @@ import {
   revertVerifierCheck,
   extractHash,
   workspaceDriftRefusal,
-  captureStartFingerprint,
+  captureBoundaryFingerprint,
+  BUILTIN_FINGERPRINT_COMMAND,
   pinnedConfigFields,
   pinnedFieldsChanged,
   configPinRefusal,
@@ -358,21 +360,47 @@ describe("workspaceDriftRefusal", () => {
 });
 
 
-describe("captureStartFingerprint", () => {
-  it("returns null when no verifier is configured", () => {
-    const result = captureStartFingerprint(cwd, undefined);
+describe("captureBoundaryFingerprint", () => {
+  it("is best-effort without a verifier: null fingerprint when git is unavailable", () => {
+    const result = captureBoundaryFingerprint(cwd, undefined);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.fingerprint).toBeNull();
   });
 
-  it("captures a trimmed hash fingerprint from a runnable command", () => {
-    const result = captureStartFingerprint(cwd, 'node -e "process.stdout.write(\'  abcdef  \\n\')"');
+  it("captures the built-in git working-tree fingerprint in a git repo", () => {
+    const repo = mkdtempSync(join(tmpdir(), tmpPrefix("gitfp")));
+    try {
+      execSync("git init -q", { cwd: repo });
+      execSync("git -c user.email=t@t -c user.name=t commit --allow-empty -q -m seed", { cwd: repo });
+      writeFileSync(join(repo, "tracked.txt"), "v1");
+      execSync("git add tracked.txt", { cwd: repo });
+      execSync("git -c user.email=t@t -c user.name=t commit -q -m add", { cwd: repo });
+      const clean = captureBoundaryFingerprint(repo, undefined);
+      expect(clean.ok).toBe(true);
+      if (clean.ok) expect(clean.fingerprint).toBe("");
+
+      writeFileSync(join(repo, "tracked.txt"), "v2");
+      const dirty = captureBoundaryFingerprint(repo, undefined);
+      expect(dirty.ok).toBe(true);
+      if (dirty.ok) expect(dirty.fingerprint).toBe("M tracked.txt");
+
+      writeFileSync(join(repo, "untracked.txt"), "artifact");
+      const stillTrackedOnly = captureBoundaryFingerprint(repo, undefined);
+      expect(stillTrackedOnly.ok).toBe(true);
+      if (stillTrackedOnly.ok) expect(stillTrackedOnly.fingerprint).toBe("M tracked.txt");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("captures a trimmed hash fingerprint from a runnable verifier", () => {
+    const result = captureBoundaryFingerprint(cwd, 'node -e "process.stdout.write(\'  abcdef  \\n\')"');
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.fingerprint).toBe("abcdef");
   });
 
   it("refuses loudly when the verifier cannot run", () => {
-    const result = captureStartFingerprint(cwd, "node -e 'process.exit(1)'");
+    const result = captureBoundaryFingerprint(cwd, "node -e 'process.exit(1)'");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.length).toBeGreaterThan(0);
   });

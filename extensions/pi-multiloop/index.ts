@@ -74,7 +74,8 @@ import {
   revertVerifierCheck,
   runVerifierCommand,
   workspaceDriftRefusal,
-  captureStartFingerprint,
+  captureBoundaryFingerprint,
+  BUILTIN_FINGERPRINT_COMMAND,
   pinnedConfigFields,
   configPinRefusal,
 } from "./anchors.js";
@@ -1009,19 +1010,17 @@ export default function (pi: ExtensionAPI) {
     if (state.protectedPaths?.length) {
       state.protectedBaseline = snapshotProtectedHashes(ctx.cwd, state.protectedPaths);
     }
-    if (state.revertVerifier) {
-      const boundary = captureStartFingerprint(ctx.cwd, state.revertVerifier);
-      if (!boundary.ok) {
-        throw new Error(
-          [
-            `Cannot start loop ${formatLaneId(id)}: the revert verifier must be runnable now — the workspace boundary is hashed at start so the first iterate can detect out-of-band edits.`,
-            boundary.error,
-            "Fix the verifier, then retry multiloop_start.",
-          ].join("\n"),
-        );
-      }
-      state.lastWorkspaceFingerprint = boundary.fingerprint ?? undefined;
+    const boundary = captureBoundaryFingerprint(ctx.cwd, state.revertVerifier);
+    if (!boundary.ok) {
+      throw new Error(
+        [
+          `Cannot start loop ${formatLaneId(id)}: the revert verifier must be runnable now — the workspace boundary is hashed at start so the first iterate can detect out-of-band edits.`,
+          boundary.error,
+          "Fix the verifier, then retry multiloop_start.",
+        ].join("\n"),
+      );
     }
+    state.lastWorkspaceFingerprint = boundary.fingerprint ?? undefined;
     state.pinnedConfig = pinnedConfigFields(state);
     ensureLaneDir(ctx.cwd, id);
     saveState(ctx.cwd, id, state);
@@ -1178,18 +1177,23 @@ export default function (pi: ExtensionAPI) {
         hypothesis: params.hypothesis ?? state.activeIteration?.hypothesis,
         changes: params.changes ?? state.activeIteration?.changes,
       };
-      if (state.revertVerifier && !state.activeIteration.revertFingerprint) {
-        const fp = runVerifierCommand(ctx.cwd, state.revertVerifier);
+      if (!state.activeIteration.revertFingerprint) {
+        const fp = state.revertVerifier
+          ? runVerifierCommand(ctx.cwd, state.revertVerifier)
+          : runVerifierCommand(ctx.cwd, BUILTIN_FINGERPRINT_COMMAND);
         if (!fp.ok) {
-          return textResult(
-            [`Cannot start iteration ${state.activeIteration.iteration} for ${formatLaneId(id)}: the revert verifier must be runnable before changes are made.`, fp.error, "Fix the verifier, then retry multiloop_iterate."].join("\n"),
-          );
+          if (state.revertVerifier) {
+            return textResult(
+              [`Cannot start iteration ${state.activeIteration.iteration} for ${formatLaneId(id)}: the revert verifier must be runnable before changes are made.`, fp.error, "Fix the verifier, then retry multiloop_iterate."].join("\n"),
+            );
+          }
+        } else {
+          const driftRefusal = workspaceDriftRefusal(state.lastWorkspaceFingerprint, fp.output.trim());
+          if (driftRefusal) {
+            return textResult(`Cannot start iteration ${state.activeIteration.iteration} for ${formatLaneId(id)}.\n${driftRefusal}`);
+          }
+          state.activeIteration.revertFingerprint = fp.output.trim();
         }
-        const driftRefusal = workspaceDriftRefusal(state.lastWorkspaceFingerprint, fp.output.trim());
-        if (driftRefusal) {
-          return textResult(`Cannot start iteration ${state.activeIteration.iteration} for ${formatLaneId(id)}.\n${driftRefusal}`);
-        }
-        state.activeIteration.revertFingerprint = fp.output.trim();
       }
       saveState(ctx.cwd, id, state);
       activeStates.set(stateKey(id), state);
@@ -1456,13 +1460,13 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
-      if (state.revertVerifier) {
-        if (params.action === "revert") {
-          state.lastWorkspaceFingerprint = state.activeIteration.revertFingerprint;
-        } else {
-          const fp = runVerifierCommand(ctx.cwd, state.revertVerifier);
-          state.lastWorkspaceFingerprint = fp.ok ? fp.output.trim() : undefined;
-        }
+      if (params.action === "revert") {
+        state.lastWorkspaceFingerprint = state.activeIteration.revertFingerprint;
+      } else {
+        const fp = state.revertVerifier
+          ? runVerifierCommand(ctx.cwd, state.revertVerifier)
+          : runVerifierCommand(ctx.cwd, BUILTIN_FINGERPRINT_COMMAND);
+        state.lastWorkspaceFingerprint = fp.ok ? fp.output.trim() : undefined;
       }
       const acceptanceSuffix = state.activeIteration.acceptanceReason
         ? ` (${state.activeIteration.acceptanceReason})`
@@ -1571,10 +1575,10 @@ export default function (pi: ExtensionAPI) {
       const activeIteration = state.activeIteration;
       const metric = params.metric ?? activeIteration?.metric;
       const action = params.action ?? "log";
-      if (state.revertVerifier) {
-        const fp = runVerifierCommand(ctx.cwd, state.revertVerifier);
-        state.lastWorkspaceFingerprint = fp.ok ? fp.output.trim() : undefined;
-      }
+      const fp = state.revertVerifier
+        ? runVerifierCommand(ctx.cwd, state.revertVerifier)
+        : runVerifierCommand(ctx.cwd, BUILTIN_FINGERPRINT_COMMAND);
+      state.lastWorkspaceFingerprint = fp.ok ? fp.output.trim() : undefined;
       applyLogIteration(ctx.cwd, id, state, action, metric, params.note);
       activeStates.set(stateKey(id), state);
       updateStatus(ctx);

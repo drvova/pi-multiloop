@@ -329,17 +329,30 @@ export function workspaceDriftRefusal(
 }
 
 /**
- * Capture the workspace fingerprint at loop start so the first iterate
- * already has a boundary to drift against. Returns null when no verifier is
- * configured. A command that cannot run refuses to start (Jidoka
- * stop-the-line): a loop whose boundary cannot be hashed has no integrity to
- * protect.
+ * Built-in boundary fingerprint for loops without a custom revert verifier:
+ * the tracked git working-tree state (staged or not). Untracked and ignored
+ * files stay outside the boundary, so verify commands that write gitignored
+ * artifacts do not trip the gate; commits are history, not working-tree
+ * drift, so routine iteration commits are invisible to it. Custom
+ * revertVerifier commands define their own scope.
  */
-export function captureStartFingerprint(
+export const BUILTIN_FINGERPRINT_COMMAND = "git status --porcelain --untracked-files=no";
+
+/**
+ * Capture the workspace boundary fingerprint at loop start and after every
+ * recorded decision, so the next iterate has a reference to drift against.
+ * With a configured verifier the command is used and a failure refuses (Jidoka
+ * stop-the-line); without one the built-in git fingerprint is best-effort —
+ * no git repository means no boundary (null), not a failure.
+ */
+export function captureBoundaryFingerprint(
   cwd: string,
   command: string | undefined
 ): { ok: true; fingerprint: string | null } | { ok: false; error: string } {
-  if (!command?.trim()) return { ok: true, fingerprint: null };
+  if (!command?.trim()) {
+    const git = runVerifierCommand(cwd, BUILTIN_FINGERPRINT_COMMAND);
+    return git.ok ? { ok: true, fingerprint: git.output.trim() } : { ok: true, fingerprint: null };
+  }
   const result = runVerifierCommand(cwd, command);
   if (!result.ok) return { ok: false, error: result.error };
   return { ok: true, fingerprint: result.output.trim() };

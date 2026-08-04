@@ -36,7 +36,7 @@ What exists vs. what we need:
 | Durable JSONL history | No (.jsonl but coupled) | Partial (TSV) | Yes |
 | Lane isolation | No | Yes (path-based) | Yes |
 | Shared results between loops | No | No | Planned (v0.2) |
-| CI/exec non-interactive mode | No | Yes | Planned (v0.2) |
+| CI/exec non-interactive mode | No | Yes | Yes (`bin/multiloop-run.mjs`) |
 | TUI dashboard | Yes | No | Yes |
 | Escalation on consecutive failures | No | Yes | Yes |
 | Cross-run learning | No | Yes | Yes |
@@ -49,7 +49,7 @@ What exists vs. what we need:
 - **Require separate worktrees.** PiSwarm uses worktree-per-agent. We use lane-per-loop on the same worktree.
 - **Build in context compression.** pi-boomerang exists and composes with us. Install both if needed.
 - **Build in goal supervision.** pi-supervisor exists and composes with us. Use it to enforce methodology over our iterations.
-- **Spawn background processes.** v0.1 is in-process. Background mode (detached `pi --mode json`) is v0.2.
+- **Spawn background processes.** In-process by default; detached mode ships via `bin/multiloop-run.mjs` (headless `pi -p --mode json` per iteration, poll-and-reap cadence).
 
 ## Implementation Checklist
 
@@ -63,5 +63,5 @@ What exists vs. what we need:
 - [x] ui.ts — Pi-native status/list/resume surfaces plus dashboard formatting helpers
 - [x] skill.md — Setup wizard skill prompt
 - [x] Tests for lanes, state, metrics, loop engine, verifiers, prompts, list/status formatting
-- [ ] Local install + integration test
+- [x] Local install + integration test (headless `pi -p` smoke; driver verified end-to-end vs a real loop)
 - [ ] Add as devstack submodule

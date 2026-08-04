@@ -10,8 +10,12 @@
     "extensions/",
     "skills/",
     "docs/",
-    "README.md"
+    "README.md",
+    "bin/"
   ],
+  "bin": {
+    "multiloop-run": "bin/multiloop-run.mjs"
+  },
   "pi": {
     "extensions": [
       "./extensions"

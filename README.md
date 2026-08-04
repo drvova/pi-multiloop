@@ -145,6 +145,20 @@ Loop mode is durable — a running loop on disk means the previous session inten
 /multiloop on    # resume auto-continuation
 ```
 
+## Detached mode (v0.2)
+
+Drive a loop with zero human and zero interactive session: `bin/multiloop-run.mjs` spawns a headless `pi -p --mode json` per iteration, waits for the iteration counter to advance, reaps the child (real pi workers never exit on their own), and moves on.
+
+```bash
+node bin/multiloop-run.mjs <repo> <lane> [<runTag>] --iterations N
+```
+
+- The driver pauses the loop first so `session_start` never auto-continues; each child is told to `multiloop_resume` as step 0, so exactly one session owns each iteration.
+- Polls `state.json` for the iteration counter; on advance it gives the child a short grace period, then terminates the whole process group.
+- Exits `0` when the loop completes or the iteration cap is reached, `1` on a stuck session or driver error, `2` on usage errors.
+- Flags: `--iterations N` (cap), `--timeout-sec` (per-iteration, default 900), `--pi-cmd` (override), `--dry-run` (print the prompt, spawn nothing), `--verbose`.
+- The driver leaves the loop `running` when it stops early — pick it up interactively or drive it again.
+
 ## Composability
 
 Works alongside other Pi extensions:

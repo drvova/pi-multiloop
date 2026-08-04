@@ -559,6 +559,22 @@ describe("buildIterationContext", () => {
     expect(buildIterationContext(state)).toContain("reduce latency");
   });
 
+  it("renders protected files and the config pin", () => {
+    const state = makeState({
+      protectedPaths: ["bench.mjs", "tests/golden.test.ts"],
+      pinnedConfig: { verifyCommand: "node bench.mjs" },
+    });
+    const context = buildIterationContext(state);
+    expect(context).toContain("Protected files (hash-verified each iteration): bench.mjs, tests/golden.test.ts");
+    expect(context).toContain("Loop config pinned");
+  });
+
+  it("omits protection lines when nothing is protected or pinned", () => {
+    const context = buildIterationContext(makeState());
+    expect(context).not.toContain("Protected files");
+    expect(context).not.toContain("Loop config pinned");
+  });
+
   it("warns about a stall when the streak passes the threshold", () => {
     const below = makeState({ stallStreak: 2 });
     expect(buildIterationContext(below)).not.toContain("Stalled");

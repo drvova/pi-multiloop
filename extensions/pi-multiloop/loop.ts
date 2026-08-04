@@ -394,6 +394,12 @@ export function buildIterationContext(state: LoopState): string {
   if (state.scope) {
     lines.push(`Scope: ${state.scope}`);
   }
+  if (state.protectedPaths?.length) {
+    lines.push(`Protected files (hash-verified each iteration): ${state.protectedPaths.join(', ')}`);
+  }
+  if (state.pinnedConfig) {
+    lines.push("Loop config pinned: verifier/stop-condition fields are frozen; editing them stops the loop.");
+  }
   if (state.maxIterations !== undefined) {
     lines.push(`Stop condition: iteration cap ${state.iteration}/${state.maxIterations}`);
   }

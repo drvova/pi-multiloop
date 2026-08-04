@@ -116,6 +116,12 @@ export interface LoopState {
   acceptanceMode: "log" | "keep-revert";
   scope?: string;
   goal?: string;
+  /** Files/directories (repo-relative) the loop may not modify; hash-verified at every measure. */
+  protectedPaths?: string[];
+  /** Content hashes of protectedPaths at loop start (path -> sha256). */
+  protectedBaseline?: Record<string, string>;
+  /** Frozen verifier/stop-condition fields at start; any drift is a hard error. */
+  pinnedConfig?: Record<string, unknown>;
   /** Stop condition: hard cap on completed iterations. Undefined means no cap. */
   maxIterations?: number;
   /** Stop condition: metric value that completes the loop. Undefined means no target. */
@@ -374,6 +380,7 @@ export function createInitialState(
     acceptanceMode?: "log" | "keep-revert";
     scope?: string;
     goal?: string;
+    protectedPaths?: string[];
     maxIterations?: number;
     targetMetric?: number;
     config?: Record<string, unknown>;
@@ -406,6 +413,7 @@ export function createInitialState(
     acceptanceMode: options.acceptanceMode ?? (mode === "optimize" ? "keep-revert" : "log"),
     scope: options.scope,
     goal: options.goal,
+    protectedPaths: options.protectedPaths,
     maxIterations: options.maxIterations,
     targetMetric: options.targetMetric,
     startedAt: new Date().toISOString(),

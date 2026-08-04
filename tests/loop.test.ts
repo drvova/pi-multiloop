@@ -490,7 +490,7 @@ describe("resumeRefusalReason", () => {
     expect(reason).not.toBeNull();
     expect(reason).toContain("10/10");
     expect(reason).toContain("immediately complete it again");
-    expect(reason).toContain(`.multiloop/active/${id.lane}/${id.runTag}/state.json`);
+    expect(reason).toContain(join(".multiloop", "active", id.lane, id.runTag, "state.json"));
   });
 
   it("refuses to resume a loop whose metric target is already met", () => {

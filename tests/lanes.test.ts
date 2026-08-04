@@ -107,12 +107,12 @@ describe("registry", () => {
 describe("lane paths", () => {
   it("constructs lane directory path", () => {
     const dir = laneDir(cwd, { lane: "perf", runTag: "run-001" });
-    expect(dir).toContain(".multiloop/active/perf/run-001");
+    expect(dir).toContain(join(".multiloop", "active", "perf", "run-001"));
   });
 
   it("creates lane directory", () => {
     const dir = ensureLaneDir(cwd, { lane: "perf", runTag: "run-001" });
-    expect(dir).toContain(".multiloop/active/perf/run-001");
+    expect(dir).toContain(join(".multiloop", "active", "perf", "run-001"));
   });
 });
 

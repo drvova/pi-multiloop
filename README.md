@@ -2,11 +2,16 @@
 
 # pi-multiloop
 
-A [Pi](https://pi.dev) extension for running multiple autonomous loops in the same worktree, each with its own isolated state.
+> **Special thanks to [lhl/pi-multiloop](https://github.com/lhl/pi-multiloop) — the original multi-lane loop engine that inspired this project.**
+> Same dream, fresh batteries. 💖
+
+A [Pi](https://pi.dev) extension for running **many autonomous loops at once** in a single worktree — each with its own little lane, its own state, and its own dreams.
 
 ## Why
 
-Most loop tools run one loop at a time. Real work is rarely that linear — you might be cutting bundle size while also fixing flaky tests, or reducing latency while working through a TODO list. Those tasks touch different files but share the same build. pi-multiloop gives each loop its own lane so they can run in parallel without separate branches or worktrees.
+Most loop tools run *one* loop at a time. Real work is rarely that linear — you might be shaving bundle size while also fixing flaky tests, or cutting latency while chewing through a TODO list. Those tasks touch different files but share the same build.
+
+pi-multiloop gives each loop its own **lane** so they can run side by side without separate branches or worktrees. Parallel loops, zero turf wars.
 
 ## Features
 
@@ -24,6 +29,8 @@ Most loop tools run one loop at a time. Real work is rarely that linear — you 
 - **Auto-continuation** — loops queue their next step automatically
 - **Compaction-aware resume** — loops recover gracefully after context compaction
 - **Escalation** — strategy adjusts after repeated failures
+- **Stall detection** — notices when iterations repeat without progress and says "hey, try something else"
+- **Durable intent** — a queued continuation survives a crash between queue and delivery
 
 ## Install
 
@@ -165,6 +172,7 @@ MULTILOOP_TEST_SEED=46d5c2a7 npx vitest run
 
 **Autoresearch / autoloop:**
 
+- [lhl/pi-multiloop](https://github.com/lhl/pi-multiloop) — the original multi-lane pi loop that inspired this one
 - [karpathy/autoresearch](https://github.com/karpathy/autoresearch) — the original edit → benchmark → keep/revert pattern
 - [lhl/codex-autoresearch](https://github.com/lhl/codex-autoresearch) — multi-loop support for Codex
 - [uditgoenka/autoresearch](https://github.com/uditgoenka/autoresearch) — Claude Code / OpenCode / Codex skill

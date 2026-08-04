@@ -13,6 +13,7 @@ import {
   buildIterationPrompt,
   cleanChildEnv,
   probePi,
+  winKillArgs,
   spawnIteration,
   stopIteration,
   iterationAdvanced,
@@ -183,6 +184,10 @@ describe("multiloop-run driver", () => {
     expect(probe.ok).toBe(false);
     expect(probe.error).toContain("/nonexistent/pi-xyz-please-do-not-exist");
     expect(probe.error).not.toContain("probe timeout"); // spawn failure, not a hang
+  });
+
+  it("builds the taskkill tree-kill argv used on Windows", () => {
+    expect(winKillArgs(1234)).toEqual(["taskkill", "/pid", "1234", "/T", "/F"]);
   });
 
   it("polls for the iteration to advance and reaps the child group", async () => {

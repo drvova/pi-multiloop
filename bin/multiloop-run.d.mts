@@ -31,6 +31,7 @@ export interface AdvanceResult {
 }
 export function parseArgs(argv: string[]): DriverOpts;
 export function probePi(piCmd: string): { ok: boolean; output: string; error: string | null };
+export function winKillArgs(pid: number | string): string[];
 export function cleanChildEnv(env: Record<string, string | undefined>): Record<string, string | undefined>;
 export function readRegistry(repo: string): { version: number; loops: LoopRegistryEntry[] };
 export function resolveLoop(registry: { loops: LoopRegistryEntry[] }, lane: string, runTag: string | null): LoopRegistryEntry | null;

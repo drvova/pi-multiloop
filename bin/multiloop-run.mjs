@@ -181,8 +181,32 @@ export function spawnIteration(cmd, argv, cwd, env) {
   return { child, output, exited };
 }
 
-/** Kill a detached child's whole process group. */
+/** Kill a detached child's whole process tree.
+ *
+ * POSIX: SIGTERM/SIGKILL the process group via process.kill(-pid).
+ * Windows: process.kill(-pid) (group kill) is unsupported and throws, so the
+ * native tree kill is taskkill /pid <pid> /T /F (there is no graceful
+ * equivalent for a detached tree on Windows).
+ */
+/** taskkill argv for a Windows tree kill (no graceful kill exists there). */
+export function winKillArgs(pid) {
+  return ["taskkill", "/pid", String(pid), "/T", "/F"];
+}
+
 export function stopIteration(child, graceMs) {
+  if (process.platform === "win32") {
+    return new Promise((resolveStop) => {
+      child.once("exit", () => resolveStop(true));
+      setTimeout(() => {
+        try {
+          spawnSync("taskkill", winKillArgs(child.pid), { stdio: "ignore" });
+        } catch {
+          // Tree already gone.
+        }
+        resolveStop(false);
+      }, graceMs).unref();
+    });
+  }
   const group = -child.pid;
   const kill = (signal) => {
     try {

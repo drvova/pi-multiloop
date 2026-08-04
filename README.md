@@ -31,6 +31,8 @@ pi-multiloop gives each loop its own **lane** so they can run side by side witho
 - **Escalation** — strategy adjusts after repeated failures
 - **Stall detection** — notices when iterations repeat without progress and says "hey, try something else"
 - **Durable intent** — a queued continuation survives a crash between queue and delivery
+- **Frozen anchors** — declare files the loop must never modify (`protectedPaths`); their content is hash-verified at every measure, so acceptance blocks a keep if the optimizer touched them
+- **Config pinning** — the verifier and stop-condition fields are pinned at start; editing them mid-loop stops the line and names the tampered field
 
 ## Install
 

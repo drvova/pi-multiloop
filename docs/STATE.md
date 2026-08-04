@@ -55,6 +55,8 @@ The snapshot also records iteration metrics:
 - `pivotCount`: number of pivots used.
 - `stallStreak`: count of trailing identical results (same changes+metric). Reached 3, it is rendered as a stall warning in every continuation prompt — repetition without progress is a distinct signal from failure (adapted from pizza's identical-tool-round stall guard).
 - `pendingContinue`: durable auto-continue intent `{ reason, queuedAt }`. Set when a continuation follow-up is queued, cleared on delivery, and cleared on pause/stop/archive/suspend/resume. Survives process death between queueing and delivery: `session_start` re-arms continuation for lanes still carrying it.
+- `protectedPaths` / `protectedBaseline`: frozen-file protection. `protectedPaths` lists repo-relative files/directories the loop may not modify; `protectedBaseline` is their content-hash snapshot from loop start. Every `multiloop_measure` re-hashes and injects a failing `protected-files` mechanical check on any drift, so acceptance blocks the keep. Enforcement is measurement, not permission: the extension has no write hook, so a changed file is caught at measure time rather than prevented.
+- `pinnedConfig`: frozen verifier/stop-condition fields (`verifyCommand`, `guardCommand`, `promptVerifier`, `metricName`, `metricDirection`, `targetMetric`, `maxIterations`, `protectedPaths`) captured at start. `multiloop_iterate`/`measure`/`decide`/`log` compare the on-disk state against the pin and refuse loudly on drift — a loop must not be allowed to edit the rule that measures it.
 - `verifyCommand` / `guardCommand`: commands the loop should run.
 
 ### Append-only result state

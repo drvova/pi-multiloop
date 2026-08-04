@@ -154,7 +154,8 @@ node bin/multiloop-run.mjs <repo> <lane> [<runTag>] --iterations N
 ```
 
 - The driver pauses the loop first so `session_start` never auto-continues; each child is told to `multiloop_resume` as step 0, so exactly one session owns each iteration.
-- Polls `state.json` for the iteration counter; on advance it gives the child a short grace period, then terminates the whole process group.
+- Polls `state.json` for the iteration counter; on advance it gives the child a short grace period, then reaps it — POSIX: SIGTERM then SIGKILL the whole process group; Windows: `taskkill /T /F` (native tree kill). Reaping is best-effort: the driver trusts the durable `state.json` result and never hangs on a child that refuses to exit.
+- Probes the pi binary once before driving — a missing or non-responsive `--pi-cmd` stops the run before a single iteration is spawned.
 - Exits `0` when the loop completes or the iteration cap is reached, `1` on a stuck session or driver error, `2` on usage errors.
 - Flags: `--iterations N` (cap), `--timeout-sec` (per-iteration, default 900), `--pi-cmd` (override), `--dry-run` (print the prompt, spawn nothing), `--verbose`.
 - The driver leaves the loop `running` when it stops early — pick it up interactively or drive it again.
@@ -184,6 +185,10 @@ The test suite draws a fresh random seed each run. To reproduce a failure, copy 
 ```bash
 MULTILOOP_TEST_SEED=46d5c2a7 npx vitest run
 ```
+
+[**CI**](https://github.com/drvova/pi-multiloop/actions/workflows/test.yml) runs the full suite on `ubuntu-latest`, `windows-latest` and `macos-latest` — the Windows job has caught and fixed real cross-platform bugs (CRLF shebangs, cmd.exe quoting, illegal path characters, process-group kills), so the suite is genuinely exercised everywhere, not assumed portable.
+
+A real-headless end-to-end runs `scripts/e2e-optimize.sh` (spawns actual `pi` sessions via the detached driver and asserts keep/revert acceptance gates work headless — takes minutes, manual by design).
 
 ## More docs
 

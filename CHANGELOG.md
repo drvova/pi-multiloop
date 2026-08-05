@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Restructured the repository into an npm-workspaces monorepo. The extension,
+  its tests, the `/multiloop` skill, and the detached driver moved into
+  `packages/multiloop`, `packages/multiloop-skill`, and `packages/multiloop-run`.
+  The root remains the published package: its `pi` manifest, `bin`, and `files`
+  now point into `packages/`, so `npm install`, `pi install`, and `pi update`
+  behave exactly as before. Layout and decisions are recorded in
+  `docs/MONOREPO.md`.
+- Cleaned the TypeScript configuration: a shared `tsconfig.base.json` now owns
+  compiler options with `noEmit` (the repo is typecheck-only; pi loads the
+  extension from source), dropping emit-only options and a stale
+  machine-specific `paths` block.
+- `vitest.config.ts` points its global setup at
+  `packages/multiloop/tests/support/global-setup.ts`; all 18 suites and 32k
+  tests run unchanged from their new home.
+
 ## 0.3.2 - 2026-08-04
 
 ### Added

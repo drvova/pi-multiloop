@@ -147,10 +147,10 @@ Loop mode is durable — a running loop on disk means the previous session inten
 
 ## Detached mode (v0.2)
 
-Drive a loop with zero human and zero interactive session: `bin/multiloop-run.mjs` spawns a headless `pi -p --mode json` per iteration, waits for the iteration counter to advance, reaps the child (real pi workers never exit on their own), and moves on.
+Drive a loop with zero human and zero interactive session: `packages/multiloop-run/bin/multiloop-run.mjs` spawns a headless `pi -p --mode json` per iteration, waits for the iteration counter to advance, reaps the child (real pi workers never exit on their own), and moves on.
 
 ```bash
-node bin/multiloop-run.mjs <repo> <lane> [<runTag>] --iterations N
+node packages/multiloop-run/bin/multiloop-run.mjs <repo> <lane> [<runTag>] --iterations N
 ```
 
 - The driver pauses the loop first so `session_start` never auto-continues; each child is told to `multiloop_resume` as step 0, so exactly one session owns each iteration.
@@ -184,7 +184,7 @@ A real-headless end-to-end runs `scripts/e2e-optimize.sh` (spawns actual `pi` se
 
 ## More docs
 
-- [Loop setup guide](skills/multiloop/references/LOOP_GUIDE.md)
+- [Loop setup guide](packages/multiloop-skill/skills/multiloop/references/LOOP_GUIDE.md)
 - [State and lifecycle](docs/STATE.md)
 - [Project plan](docs/PLAN.md)
 

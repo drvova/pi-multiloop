@@ -38,7 +38,7 @@ The publish workflow re-runs both gates in CI before publishing, so this is just
 - [ ] `CHANGELOG.md` has a section for the new version (`## X.Y.Z - YYYY-MM-DD`) — the workflow extracts this verbatim as the GitHub Release body, so write it for humans.
 - [ ] `docs/PLAN.md` updated if scope or north stars changed.
 - [ ] `AGENTS.md` updated if file layout or conventions changed.
-- [ ] Mode descriptions in `extensions/pi-multiloop/modes.ts` updated if modes changed.
+- [ ] Mode descriptions in `packages/multiloop/extensions/pi-multiloop/modes.ts` updated if modes changed.
 
 ## Cut the Release
 

@@ -1,0 +1,11 @@
+{
+  "name": "@multiloop/skill",
+  "version": "0.3.2",
+  "description": "The /multiloop setup-wizard skill and loop guide for the pi-multiloop extension.",
+  "private": true,
+  "type": "module",
+  "keywords": ["pi-package", "pi-skill"],
+  "pi": {
+    "skills": ["./skills"]
+  }
+}

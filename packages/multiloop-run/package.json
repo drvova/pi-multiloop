@@ -1,0 +1,10 @@
+{
+  "name": "@multiloop/run",
+  "version": "0.3.2",
+  "description": "Detached loop driver: keeps the iterate/measure/decide cadence running via headless pi sessions, with poll-and-reap iteration advance.",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "multiloop-run": "bin/multiloop-run.mjs"
+  }
+}

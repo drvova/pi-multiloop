@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end proof that the extension's keep/revert acceptance gate works in a
-# detached (headless pi) iteration driven by bin/multiloop-run.mjs.
+# detached (headless pi) iteration driven by packages/multiloop-run/bin/multiloop-run.mjs.
 #
 # Creates a temp repo with an optimize-mode loop (verifyCommand: cat value.txt,
 # metric 1, direction higher), drives 2 iterations, then asserts that at least
@@ -30,7 +30,7 @@ mkdir -p "$REPO"
 node "$ROOT/scripts/e2e-mkloop.mjs" "$REPO" opt run-001 >/dev/null || exit 1
 
 echo "== driving detached optimize loop (2 iterations, real headless pi) =="
-node "$ROOT/bin/multiloop-run.mjs" "$REPO" opt run-001 --iterations 2 --timeout-sec 480 || {
+node "$ROOT/packages/multiloop-run/bin/multiloop-run.mjs" "$REPO" opt run-001 --iterations 2 --timeout-sec 480 || {
   echo "FAIL: driver exited non-zero"
   exit 1
 }

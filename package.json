@@ -3,26 +3,33 @@
   "version": "0.3.2",
   "description": "Autoloop/autoresearch extension for Pi with multi-lane isolation",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "keywords": [
     "pi-package"
   ],
   "files": [
-    "extensions/",
-    "skills/",
+    "packages/multiloop/extensions",
+    "packages/multiloop-skill/skills",
+    "packages/multiloop-run/bin",
     "docs/",
-    "README.md",
-    "bin/"
+    "README.md"
   ],
   "bin": {
-    "multiloop-run": "bin/multiloop-run.mjs"
+    "multiloop-run": "packages/multiloop-run/bin/multiloop-run.mjs"
   },
   "pi": {
     "extensions": [
-      "./extensions"
+      "./packages/multiloop/extensions"
     ],
     "skills": [
-      "./skills"
+      "./packages/multiloop-skill/skills"
     ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "repository": {
     "type": "git",

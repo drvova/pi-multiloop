@@ -17,7 +17,7 @@ import {
   spawnIteration,
   stopIteration,
   iterationAdvanced,
-} from "../bin/multiloop-run.mjs";
+} from "../../multiloop-run/bin/multiloop-run.mjs";
 
 const stubPi = fileURLToPath(new URL("./support/stub-pi.mjs", import.meta.url));
 

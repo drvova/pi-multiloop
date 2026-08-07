@@ -39,6 +39,7 @@ pi-multiloop gives each loop its own **lane** so they can run side by side witho
 - **Out-of-band edits refused** — the extension fingerprints the workspace at loop start and at every decision boundary; editing files outside an iteration is detected at the next `multiloop_iterate` and stops the line, so a revert can never be verified against a dirty baseline. With a `revertVerifier` the verifier command defines the fingerprint; without one, a built-in git working-tree fingerprint covers every loop automatically
 - **Pivots actually teach** — the latest pivot lesson is rendered into every continuation prompt instead of disappearing into a `lessons.md` nobody reads
 - **Champion comparison** — `multiloop_compare` (or `/multiloop compare perf mem`) renders two runs side by side with a champion verdict, reading archived runs too: offline champion-challenger evaluation on frozen history, with zero cross-lane writes
+- **Loop subagents** — `multiloop_agent` spawns a loop into an isolated background subagent that inherits your session's model: live fleet widget, completion notifications, mid-run steering, and result/stop/list management tools
 
 ## Install
 
@@ -64,6 +65,32 @@ pi install git:https://github.com/drvova/pi-multiloop
 /multiloop resume perf/run-001
 /multiloop stop perf/run-001
 ```
+
+## Loop subagents
+
+`multiloop_agent` hands a loop to an isolated child Pi session that inherits
+your current model and runs the whole cadence itself — start, iterate,
+measure, decide — until the stop condition, then reports back:
+
+```json
+{
+  "goal": "Reduce bundle size",
+  "verifyCommand": "node scripts/bundle-size.mjs",
+  "lane": "size",
+  "metricDirection": "lower",
+  "guardCommand": "npm test",
+  "maxIterations": 10
+}
+```
+
+Runs are background by default: progress shows live in the `multiloop-agents`
+widget (spinner, tree, per-agent iteration/metric/decision stats), and the
+report arrives as a follow-up message. Parallel runs share the `.multiloop/`
+registry, so `/multiloop` status and `multiloop_compare` see them too. Steer a
+running agent with `multiloop_agent_steer`, poll it with
+`multiloop_agent_result`, stop it with `multiloop_agent_stop`, list the fleet
+with `multiloop_agents` or `/multiloop-agents`. Details:
+[packages/multiloop-agent](packages/multiloop-agent/README.md).
 
 ## Modes
 

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+- Added `@multiloop/agent`, autonomous loop subagents: `multiloop_agent`
+  spawns a loop into an isolated background child Pi session that inherits the
+  caller's model, drives the full iterate/measure/decide cadence, and reports
+  back — with a live `multiloop-agents` fleet widget, follow-up completion
+  notifications, mid-run steering (`multiloop_agent_steer`), and a management
+  toolset (`multiloop_agent_result` with cancellable wait,
+  `multiloop_agent_stop`, `multiloop_agents`, `/multiloop-agents`, and
+  `resume` on spawn). This delivers the PLAN's mid-loop steerability north
+  star at the fleet level. The root `pi` manifest and `files` list include
+  the new packages, so install/update behavior is unchanged.
+- Added `@multiloop/child-agent`, the shared isolated child-session core
+  (spawn, resource isolation, abort discipline, report extraction) under the
+  subagent. Requires pi-coding-agent 0.83 APIs, so the repo's devDependencies
+  moved from ^0.74.0 to ^0.83.0.
+
 ### Changed
 - Restructured the repository into an npm-workspaces monorepo. The extension,
   its tests, the `/multiloop` skill, and the detached driver moved into

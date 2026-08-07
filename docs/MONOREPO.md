@@ -20,9 +20,15 @@ pi-multiloop/                       # pi-multiloop (published npm + pi package, 
 │   ├── multiloop-skill/            # @multiloop/skill (private)
 │   │   ├── skills/multiloop/       # skill.md + references/LOOP_GUIDE.md
 │   │   └── package.json            # pi manifest: skills
-│   └── multiloop-run/              # @multiloop/run (private)
-│       ├── bin/multiloop-run.mjs   # detached headless driver (+ .d.mts types)
-│       └── package.json            # bin manifest
+│   ├── multiloop-run/              # @multiloop/run (private)
+│   │   ├── bin/multiloop-run.mjs   # detached headless driver (+ .d.mts types)
+│   │   └── package.json            # bin manifest
+│   ├── multiloop-agent/            # @multiloop/agent (private)
+│   │   ├── extensions/multiloop-agent/  # subagent extension source (index.ts)
+│   │   └── package.json            # pi manifest: extensions
+│   └── child-agent/                # @multiloop/child-agent (private)
+│       ├── src/index.ts            # isolated child-session core (spawn, isolation, aborts, extraction)
+│       └── package.json            # library manifest
 ├── scripts/                        # e2e harnesses (manual)
 └── docs/                           # PLAN, STATE, TODO, FEEDBACK, PUBLISH, MONOREPO
 ```

@@ -13,6 +13,8 @@
     "packages/multiloop/extensions",
     "packages/multiloop-skill/skills",
     "packages/multiloop-run/bin",
+    "packages/multiloop-agent/extensions",
+    "packages/child-agent/src",
     "docs/",
     "README.md"
   ],
@@ -21,7 +23,8 @@
   },
   "pi": {
     "extensions": [
-      "./packages/multiloop/extensions"
+      "./packages/multiloop/extensions",
+      "./packages/multiloop-agent/extensions"
     ],
     "skills": [
       "./packages/multiloop-skill/skills"
@@ -48,9 +51,9 @@
     "@sinclair/typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@earendil-works/pi-tui": "^0.74.0",
+    "@earendil-works/pi-ai": "^0.83.0",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@earendil-works/pi-tui": "^0.83.0",
     "@sinclair/typebox": "^0.34.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.10"

@@ -1,0 +1,11 @@
+{
+  "name": "@multiloop/child-agent",
+  "version": "0.1.0",
+  "description": "Shared isolated child-agent session core for pi subagents: session spawn, resource isolation, abort discipline, and report extraction.",
+  "private": true,
+  "type": "module",
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

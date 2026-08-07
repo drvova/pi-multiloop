@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Added
+- Added **mesh mailbox**: file-based inter-lane messaging via `multiloop_send`
+  and `multiloop_inbox`. Each lane owns an append-only `mesh.jsonl` mailbox;
+  messages surface automatically as a "Mesh inbox" block in the recipient's
+  next iteration context. Stigmergy over live IPC — the mailbox file is the
+  channel, mirroring `results.jsonl` for metrics. Works across interactive,
+  fleet, and detached paths.
+- Added **fleet immune checks**: `fleet-tools.test.ts` enforces exact set sync
+  between the extension's registered `multiloop_*` tools and the fleet child
+  allowlist (`MULTILOOP_TOOLS`) — a tool added to the extension but not
+  allowlisted for children fails the build. `child-agent.test.ts` covers the
+  session core's abort discipline, isolation flags, and report extraction via
+  the injectable `ChildAgentSessionFactory` seam (first coverage for the
+  package).
 - Added `@multiloop/agent`, autonomous loop subagents: `multiloop_agent`
   spawns a loop into an isolated background child Pi session that inherits the
   caller's model, drives the full iterate/measure/decide cadence, and reports
@@ -19,6 +32,17 @@
   moved from ^0.74.0 to ^0.83.0.
 
 ### Changed
+- The detached driver's `buildIterationPrompt` is now a thin kick: it names the
+  target and tells the child to call `multiloop_resume` as step 0, whose tool
+  output carries the full iteration context and protocol. The driver no longer
+  duplicates goal/verify/metric/stall state that the extension already owns —
+  two sources of truth collapsed to one. Detached iterations now inherit mesh
+  inbox lines for free.
+- `@multiloop/child-agent` fixed against the installed SDK: `InlineExtension`
+  renamed to `ExtensionFactory` (a bare function, not a `{name, factory}`
+  object), `ModelRuntime` removed from the session options. Redundant
+  `resourceLoader.reload()` removed — `createAgentSession` reloads internally.
+  The fleet call site passes the factory bare.
 - Restructured the repository into an npm-workspaces monorepo. The extension,
   its tests, the `/multiloop` skill, and the detached driver moved into
   `packages/multiloop`, `packages/multiloop-skill`, and `packages/multiloop-run`.

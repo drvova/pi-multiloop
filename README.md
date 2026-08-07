@@ -13,6 +13,12 @@ Most loop tools run *one* loop at a time. Real work is rarely that linear — yo
 
 pi-multiloop gives each loop its own **lane** so they can run side by side without separate branches or worktrees. Parallel loops, zero turf wars.
 
+> **New — Loop subagents & mesh.** Hand a loop to an isolated background agent
+> (`multiloop_agent`) that runs the whole cadence itself — live fleet widget,
+> mid-run steering, completion reports. Lanes talk to each other via file-based
+> mailboxes (`multiloop_send` / `multiloop_inbox`) — dead-end warnings and
+> breakthrough hints surface in the next iteration's context automatically.
+
 ## Features
 
 - **Multi-loop isolation** — multiple loops on one worktree, each with independent state
@@ -67,8 +73,9 @@ pi install git:https://github.com/drvova/pi-multiloop
 /multiloop stop perf/run-001
 ```
 
-## Loop subagents
+## Subagents — autonomous loop runners
 
+> `multiloop_agent` hands a loop to an isolated child Pi session that inherits
 `multiloop_agent` hands a loop to an isolated child Pi session that inherits
 your current model and runs the whole cadence itself — start, iterate,
 measure, decide — until the stop condition, then reports back:
@@ -98,6 +105,28 @@ and `multiloop_inbox` are in the child allowlist, and the Loop Runner prompt
 teaches the mesh as the one sanctioned cross-lane channel (the "drive only your
 own loop" rule otherwise stands). Messages addressed to a fleet child surface in
 its next iteration context alongside messages from interactive lanes.
+
+## Mesh — inter-lane messaging
+
+Lanes are independent by design, but sometimes one lane discovers something
+another should know. The mesh is a file-based mailbox: `multiloop_send` posts a
+note to another lane's inbox; `multiloop_inbox` reads it. Messages surface
+automatically as a **Mesh inbox** block in the recipient's next iteration
+context — no live IPC, no sockets, no race conditions. The mailbox file is the
+channel, mirroring the role `results.jsonl` plays for metrics.
+
+```bash
+# Lane "perf" warns lane "quant" about a flaky verify command
+multiloop_send from="perf/run-001" to="quant/run-002" body="verify is flaky under load — add --retry 3"
+
+# Read your inbox
+multiloop_inbox target="quant/run-002"
+```
+
+Works across all three execution paths — interactive sessions, fleet
+subagents, and detached headless runs. A fleet-tools sync test enforces that
+the mesh tools stay in the child allowlist (the seam failed once; it is now
+immune).
 
 ## Modes
 

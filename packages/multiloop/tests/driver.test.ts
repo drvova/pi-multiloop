@@ -136,34 +136,27 @@ describe("multiloop-run driver", () => {
     expect(shouldContinue({ status: "paused", iteration: 0 }, { iterations: Infinity })).toEqual({ ok: true, reason: "" });
   });
 
-  it("builds an iteration prompt carrying goal, metric, and protocol", () => {
-    const state = {
-      goal: "shrink bundle",
-      verifyCommand: "npm run size",
-      guardCommand: "npm test",
-      acceptancePolicy: "metric improves and checks pass",
-      metricName: "kb",
-      metricDirection: "lower",
-      currentMetric: 120,
-      bestMetric: 110,
-      protectedPaths: ["report.html"],
-      stallStreak: 3,
-    };
-    const prompt = buildIterationPrompt(state, { lane: "perf", runTag: "run-1", mode: "optimize" }, 4);
-    const pausedPrompt = buildIterationPrompt({ ...state, status: "paused" }, { lane: "perf", runTag: "run-1", mode: "optimize" }, 4);
-    expect(pausedPrompt).toContain("multiloop_resume");
-    expect(pausedPrompt).toContain("step 0");
-    expect(prompt).toContain("shrink bundle");
-    expect(prompt).toContain("npm run size");
-    expect(prompt).toContain("npm test");
-    expect(prompt).toContain("kb (lower is better)");
-    expect(prompt).toContain("120");
-    expect(prompt).toContain("110");
-    expect(prompt).toContain("report.html");
-    expect(prompt).toContain("3 identical iterations");
-    expect(prompt).toContain("iteration (#4)");
+  it("builds a thin kick prompt that delegates protocol to multiloop_resume", () => {
+    // The extension is the single source of truth for the iteration protocol:
+    // the driver prompt only names the target and the headless boundaries, and
+    // must NOT restate loop state (goal, verify command, metrics, stalls) —
+    // multiloop_resume's tool output carries that.
+    const prompt = buildIterationPrompt({ lane: "perf", runTag: "run-1", mode: "optimize" }, 4);
+    expect(prompt).toContain("lane 'perf'");
+    expect(prompt).toContain("run run-1");
+    expect(prompt).toContain("mode optimize");
+    expect(prompt).toContain("iteration #4");
+    expect(prompt).toContain("multiloop_resume");
+    expect(prompt).toContain("'perf/run-1'");
+    expect(prompt).toContain("Step 0");
+    expect(prompt).toContain("exactly one iteration");
+    expect(prompt).toContain("one-paragraph summary");
     expect(prompt).not.toContain("undefined");
-    expect(prompt).not.toContain("multiloop_resume");
+    // No duplicated loop state: context lives in the resume tool output.
+    expect(prompt).not.toContain("Verify command:");
+    expect(prompt).not.toContain("Current metric:");
+    expect(prompt).not.toContain("Protected files");
+    expect(prompt).not.toContain("identical iterations");
   });
 
   it("strips session-routing vars so the child starts its own pi session", () => {

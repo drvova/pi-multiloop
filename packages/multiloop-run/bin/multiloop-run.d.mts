@@ -38,7 +38,7 @@ export function resolveLoop(registry: { loops: LoopRegistryEntry[] }, lane: stri
 export function readLoopState(repo: string, entry: { stateDir?: string }): Record<string, unknown>;
 export function pauseLoop(repo: string, entry: { stateDir?: string }, state: Record<string, unknown>): Record<string, unknown>;
 export function shouldContinue(state: Record<string, unknown>, opts: Partial<DriverOpts>): GateResult;
-export function buildIterationPrompt(state: Record<string, unknown>, entry: { lane: string; runTag: string; mode?: string }, nextIteration: number): string;
+export function buildIterationPrompt(entry: { lane: string; runTag: string; mode?: string }, nextIteration: number): string;
 export function spawnIteration(cmd: string, argv: string[], cwd: string, env?: Record<string, string | undefined>): SpawnedIteration;
 export function stopIteration(child: import("node:child_process").ChildProcess, graceMs: number): Promise<boolean>;
 export function iterationAdvanced(repo: string, entry: { stateDir?: string }, before: number, timeoutMs: number, intervalMs?: number): Promise<AdvanceResult>;

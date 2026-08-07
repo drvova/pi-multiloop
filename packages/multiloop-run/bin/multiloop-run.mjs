@@ -128,32 +128,24 @@ export function shouldContinue(state, opts) {
   return { ok: true, reason: "" };
 }
 
-export function buildIterationPrompt(state, entry, nextIteration) {
-  const lines = [
-    `You are executing one iteration of the pi-multiloop loop lane '${entry.lane}' (run ${entry.runTag}, mode ${entry.mode}) in this repository.`,
+/**
+ * Thin kick for one detached iteration. The extension is the single source of
+ * truth for the loop protocol: multiloop_resume's tool output carries the full
+ * iteration context (goal, verify/guard commands, protected paths, stall and
+ * drift warnings, mesh inbox) plus the iterate/measure/decide cadence, so this
+ * prompt only names the target and the headless boundaries the driver owns.
+ */
+export function buildIterationPrompt(entry, nextIteration) {
+  return [
+    `You are executing exactly one iteration of the pi-multiloop loop lane '${entry.lane}' (run ${entry.runTag}, mode ${entry.mode}) in this repository — iteration #${nextIteration}.`,
     ``,
-    `Loop goal: ${state.goal ?? "(none)"}`,
-    `Verify command: ${state.verifyCommand ?? "(none)"} — run it yourself with your bash tool.`,
-    state.guardCommand ? `Guard command: ${state.guardCommand}` : null,
-    `Acceptance policy: ${state.acceptancePolicy ?? "(none)"}`,
-    `Metric: ${state.metricName ?? "value"} (${state.metricDirection === "higher" ? "higher is better" : "lower is better"})`,
-    `Current metric: ${state.currentMetric ?? "not yet measured"}`,
-    state.bestMetric !== undefined && state.bestMetric !== null ? `Best metric: ${state.bestMetric}` : null,
-    state.protectedPaths?.length ? `Protected files (never modify): ${state.protectedPaths.join(", ")}` : null,
-    (state.stallStreak ?? 0) >= 3 ? `WARNING: ${state.stallStreak} identical iterations in a row. Change the approach — repetition without progress is a stall.` : null,
-    state.status === "paused" ? `NOTE: the loop is currently paused (the driver pauses it so session_start does not auto-continue). Call multiloop_resume for lane '${entry.lane}' as step 0 — this session owns the iteration.` : null,
+    `Step 0: call multiloop_resume with target '${entry.lane}/${entry.runTag}'. Its tool output is your full iteration context and protocol — follow it. (The driver paused the loop so this session owns the iteration; resuming is expected.)`,
     ``,
-    `Protocol for this iteration (#${nextIteration}):`,
-    `1. Call multiloop_iterate with a hypothesis for this iteration.`,
-    `2. Make the change.`,
-    `3. Run the verify command (and guard command) yourself and record the outputs.`,
-    `4. Call multiloop_measure with the measurement(s) you observed.`,
-    `5. Call multiloop_decide with the action its output recommends (the recorded acceptance decides — do not argue with it). In log-mode loops, multiloop_log is the correct finish.`,
-    `6. If the iteration context warns about out-of-band edits, pinned config, or a failed check, stop and report it verbatim.`,
-    ``,
-    `Finish with a one-paragraph summary of what you changed and the recorded result.`,
-  ];
-  return lines.filter((l) => l !== null).join("\n");
+    `Boundaries:`,
+    `- Run exactly one iteration (iterate, change, verify, measure, decide/log), then stop — the driver reaps this session once the iteration is recorded.`,
+    `- If the resumed context warns about out-of-band edits, pinned config drift, or a failed check, stop and report it verbatim instead of working around it.`,
+    `- Finish with a one-paragraph summary of what you changed and the recorded result.`,
+  ].join("\n");
 }
 
 /**
@@ -287,7 +279,7 @@ export async function main() {
       return 0;
     }
     const nextIteration = state.iteration + 1;
-    const prompt = buildIterationPrompt(state, entry, nextIteration);
+    const prompt = buildIterationPrompt(entry, nextIteration);
     if (opts.dryRun) {
       console.log(prompt);
       return 0;

@@ -16,7 +16,13 @@ import multiloopExtension, {
 
 const CHILD_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
 
-const MULTILOOP_TOOLS = [
+/**
+ * Tools a Loop Runner child may call. Kept in exact sync with the extension's
+ * registered multiloop_* tools — packages/multiloop/tests/fleet-tools.test.ts
+ * fails when the two drift (a tool added to the extension but not allowlisted
+ * here is silently invisible to fleet children).
+ */
+export const MULTILOOP_TOOLS = [
 	"multiloop_start",
 	"multiloop_iterate",
 	"multiloop_measure",

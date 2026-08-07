@@ -62,7 +62,8 @@ export async function createChildAgentSession(
 	createSession: ChildAgentSessionFactory = createAgentSession,
 ): Promise<ChildAgentSession> {
 	const resourceLoader = createIsolatedResourceLoader(spec);
-	await resourceLoader.reload();
+	// No explicit reload here: createAgentSession reloads the loader internally
+	// (sdk.js), and a pre-reload would run package-manager discovery twice.
 	const { session } = await createSession({
 		cwd: spec.cwd,
 		model: spec.model,

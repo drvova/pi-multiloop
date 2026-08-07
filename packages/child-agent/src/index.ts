@@ -2,10 +2,9 @@ import type { Model } from "@earendil-works/pi-ai";
 import {
 	createAgentSession,
 	DefaultResourceLoader,
+	type ExtensionFactory,
 	getAgentDir,
 	SessionManager,
-	type InlineExtension,
-	type ModelRuntime,
 	type ResourceLoader,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -24,9 +23,7 @@ export interface ChildAgentSpec {
 	/** SDK custom tools registered outside extensions. */
 	customTools?: ToolDefinition[];
 	/** Inline extensions loaded into the child (factories run with full pi APIs). */
-	extensionFactories?: InlineExtension[];
-	/** Canonical model/auth runtime, when the caller has one to share. */
-	modelRuntime?: ModelRuntime;
+	extensionFactories?: ExtensionFactory[];
 }
 
 export type ChildAgentSession = Awaited<ReturnType<typeof createAgentSession>>["session"];
@@ -44,7 +41,7 @@ export type ChildAgentSessionFactory = (
 export function createIsolatedResourceLoader(spec: {
 	cwd: string;
 	systemPrompt: string;
-	extensionFactories?: InlineExtension[];
+	extensionFactories?: ExtensionFactory[];
 }): ResourceLoader {
 	return new DefaultResourceLoader({
 		cwd: spec.cwd,
@@ -73,7 +70,6 @@ export async function createChildAgentSession(
 		resourceLoader,
 		tools: spec.tools,
 		customTools: spec.customTools,
-		modelRuntime: spec.modelRuntime,
 	});
 	return session;
 }

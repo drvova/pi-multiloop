@@ -245,7 +245,7 @@ async function runLoopAgent(
 		model,
 		systemPrompt: buildSystemPrompt(cwd),
 		tools: [...CHILD_BUILTIN_TOOLS, ...MULTILOOP_TOOLS],
-		extensionFactories: [{ name: "pi-multiloop", factory: multiloopExtension }],
+		extensionFactories: [multiloopExtension],
 	});
 	record.session = session;
 	const snapshot = (): LoopAgentDetails => ({

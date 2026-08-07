@@ -40,6 +40,7 @@ pi-multiloop gives each loop its own **lane** so they can run side by side witho
 - **Pivots actually teach** — the latest pivot lesson is rendered into every continuation prompt instead of disappearing into a `lessons.md` nobody reads
 - **Champion comparison** — `multiloop_compare` (or `/multiloop compare perf mem`) renders two runs side by side with a champion verdict, reading archived runs too: offline champion-challenger evaluation on frozen history, with zero cross-lane writes
 - **Loop subagents** — `multiloop_agent` spawns a loop into an isolated background subagent that inherits your session's model: live fleet widget, completion notifications, mid-run steering, and result/stop/list management tools
+- **Mesh mailbox** — `multiloop_send` posts a note to another lane's inbox; `multiloop_inbox` reads it. Messages surface automatically in the recipient's next iteration context as a "Mesh inbox" block, so sibling lanes share dead-end warnings and breakthrough hints without live IPC — the mailbox file is the channel, mirroring the role `results.jsonl` plays for metrics
 
 ## Install
 
@@ -91,6 +92,12 @@ running agent with `multiloop_agent_steer`, poll it with
 `multiloop_agent_result`, stop it with `multiloop_agent_stop`, list the fleet
 with `multiloop_agents` or `/multiloop-agents`. Details:
 [packages/multiloop-agent](packages/multiloop-agent/README.md).
+
+Fleet children get every `multiloop_*` tool including the mesh — `multiloop_send`
+and `multiloop_inbox` are in the child allowlist, and the Loop Runner prompt
+teaches the mesh as the one sanctioned cross-lane channel (the "drive only your
+own loop" rule otherwise stands). Messages addressed to a fleet child surface in
+its next iteration context alongside messages from interactive lanes.
 
 ## Modes
 
@@ -148,7 +155,8 @@ All state lives in `.multiloop/` at your repo root:
 ├── active/<lane>/<run>/
 │   ├── results.jsonl      # append-only iteration log
 │   ├── state.json         # resume snapshot
-│   └── lessons.md         # strategy notes (optional)
+│   ├── lessons.md         # strategy notes (optional)
+│   └── mesh.jsonl         # inter-lane inbox (optional)
 └── archive/               # archived runs
 ```
 
@@ -174,7 +182,7 @@ Loop mode is durable — a running loop on disk means the previous session inten
 
 ## Detached mode (v0.2)
 
-Drive a loop with zero human and zero interactive session: `packages/multiloop-run/bin/multiloop-run.mjs` spawns a headless `pi -p --mode json` per iteration, waits for the iteration counter to advance, reaps the child (real pi workers never exit on their own), and moves on.
+Drive a loop with zero human and zero interactive session: `packages/multiloop-run/bin/multiloop-run.mjs` spawns a headless `pi -p --mode json` per iteration, waits for the iteration counter to advance, reaps the child (real pi workers never exit on their own), and moves on. The driver prompt is a thin kick — it names the target and tells the child to call `multiloop_resume` as step 0; the extension's tool output is the single source of truth for the iteration protocol (goal, verify command, guards, mesh inbox), so the driver never duplicates what the extension already owns.
 
 ```bash
 node packages/multiloop-run/bin/multiloop-run.mjs <repo> <lane> [<runTag>] --iterations N
@@ -188,6 +196,44 @@ node packages/multiloop-run/bin/multiloop-run.mjs <repo> <lane> [<runTag>] --ite
 - The driver leaves the loop `running` when it stops early — pick it up interactively or drive it again.
 - A human `/multiloop stop` or `/multiloop pause` takes effect **between** sessions: the running headless child finishes its pending iteration and records it, and the driver exits at the next stop-condition check.
 
+## Architecture
+
+The system is five packages that compose as one organism — one brain, one
+session core, two execution faces, one front door:
+
+```
+multiloop-skill            setup wizard → multiloop_start
+        │
+multiloop (extension)      THE BRAIN — loop state machine, keep/revert
+        │                  gates, anchors, mesh mailbox, all tools
+        │
+   child-agent             THE SESSION CORE — isolated in-process sessions
+        │                  (single worker mechanism, shared by both faces)
+   ┌────┴─────┐
+multiloop-agent         multiloop-run
+in-session fleet face   detached CLI face
+fleet widget, steering   cron/CI, poll-and-reap
+        └──── both delegate protocol to the extension's tools ────┘
+```
+
+Neither face encodes loop protocol — both get it from the extension's tool
+outputs (the detached driver's prompt is a thin kick that calls
+`multiloop_resume`; the fleet child loads the extension inline). `.multiloop/`
+on disk is the single state substrate all five packages share.
+
+| Package | Role |
+|---|---|
+| `@multiloop/extension` | Loop state machine, tools, mesh, anchors, widget |
+| `@multiloop/skill` | Setup wizard skill |
+| `@multiloop/child-agent` | Shared isolated session core (spawn, abort, report) |
+| `@multiloop/agent` | Fleet runner: background Loop Runner children, widget, steering |
+| `@multiloop/run` | Detached driver: headless `pi -p` per iteration, poll-and-reap |
+
+A fleet-tools sync test (`packages/multiloop/tests/fleet-tools.test.ts`)
+enforces that the extension's registered `multiloop_*` tools stay in exact set
+sync with the fleet child allowlist — a tool added to the extension but not
+allowlisted for children fails the build. The mesh tools shipped hidden once;
+that seam is now immune.
 ## Development
 
 ```bash

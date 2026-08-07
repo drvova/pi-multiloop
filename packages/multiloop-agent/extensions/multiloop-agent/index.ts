@@ -305,7 +305,7 @@ async function runLoopAgent(
 		for (let nudge = 0; nudge < DRIVER_NUDGE_LIMIT; nudge++) {
 			const mine = collectRunningLoops(cwd, new Set()).filter((state) => state.runTag === record.runTag);
 			if (mine.length === 0) break;
-			await session.prompt(buildAutoContinuePrompt(mine));
+			await session.prompt(buildAutoContinuePrompt(cwd, mine));
 		}
 	} finally {
 		unsubscribe();

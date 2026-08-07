@@ -360,7 +360,7 @@ export function reanchor(cwd: string, id: LaneId): LoopState | null {
   return reconstructState(cwd, id);
 }
 
-export function buildIterationContext(state: LoopState): string {
+export function buildIterationContext(state: LoopState, meshPeers: string[] = []): string {
   const lines: string[] = [];
   lines.push(`## Active Loop: ${state.lane}/${state.runTag}`);
   lines.push(`Mode: ${state.mode} | Iteration: ${state.iteration} | Status: ${state.status}`);
@@ -455,6 +455,11 @@ export function buildIterationContext(state: LoopState): string {
   }
   if ((state.stallStreak ?? 0) >= STALL_THRESHOLD) {
     lines.push(`Stalled: ${state.stallStreak} identical iterations. Change the approach — repetition without progress is a stall, not a search.`);
+  }
+
+  if (meshPeers.length > 0) {
+    lines.push(`Mesh inbox (${meshPeers.length} pending from sibling lanes):`);
+    lines.push(...meshPeers);
   }
 
   return lines.join("\n");

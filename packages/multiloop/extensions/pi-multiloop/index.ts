@@ -46,6 +46,7 @@ import {
   establishBaseline,
   applyLogIteration,
 } from "./loop.js";
+import { sendMessage, peekMessages, readMessages, formatMessages } from "./mesh.js";
 import { MODES, type LoopMode } from "./modes.js";
 import {
   MODE_ENTRY_TYPE,
@@ -286,7 +287,7 @@ function queueCompactionResume(
     if (ctx.hasPendingMessages()) return;
     try {
       markLoopTurn("compaction-resume");
-      pi.sendUserMessage(buildCompactionResumePrompt(latestStates, compactionEntryId), { deliverAs: "followUp" });
+      pi.sendUserMessage(buildCompactionResumePrompt(ctx.cwd, latestStates, compactionEntryId), { deliverAs: "followUp" });
       clearPendingContinue(latestStates, ctx.cwd);
     } catch (err) {
       ctx.ui.notify(`multiloop resume after compact failed: ${(err as Error).message}`, "error");
@@ -309,7 +310,7 @@ function queueLoopAutoContinue(
     if (ctx.hasPendingMessages()) return;
     try {
       markLoopTurn(`auto-continue:${reason}`);
-      pi.sendUserMessage(buildAutoContinuePrompt(latestStates), { deliverAs: "followUp" });
+      pi.sendUserMessage(buildAutoContinuePrompt(ctx.cwd, latestStates), { deliverAs: "followUp" });
       clearPendingContinue(latestStates, ctx.cwd);
     } catch (err) {
       ctx.ui.notify(`multiloop auto-continue failed: ${(err as Error).message}`, "error");
@@ -317,12 +318,26 @@ function queueLoopAutoContinue(
   }, 0);
 }
 
+/** Number of pending mesh messages folded into each iteration context. */
+const MESH_PEEK_COUNT = 10;
+
+/** Pre-rendered mesh inbox lines for one lane, or [] when the mailbox is empty. */
+function meshLinesFor(cwd: string, state: LoopState): string[] {
+  const pending = peekMessages(cwd, { lane: state.lane, runTag: state.runTag }, MESH_PEEK_COUNT);
+  return pending.length === 0 ? [] : formatMessages(pending);
+}
+
 function buildLoopResumePrompt(
+  cwd: string,
   heading: string,
   states: LoopState[],
   compactionEntryId?: string
 ): string {
-  const contexts = states.map((state) => buildIterationContext(state)).join("\n\n");
+  const contexts = states
+    .map((state) =>
+      buildIterationContext(state, meshLinesFor(cwd, state))
+    )
+    .join("\n\n");
   return [
     heading,
     compactionEntryId ? `Compaction entry: ${compactionEntryId}` : undefined,
@@ -344,23 +359,27 @@ function buildLoopResumePrompt(
   ].filter((line): line is string => line !== undefined).join("\n");
 }
 
-export function buildExplicitResumePrompt(states: LoopState[]): string {
-  return buildLoopResumePrompt("Resume active pi-multiloop work from persisted state.", states);
+export function buildExplicitResumePrompt(cwd: string, states: LoopState[]): string {
+  return buildLoopResumePrompt(cwd, "Resume active pi-multiloop work from persisted state.", states);
 }
 
 export function buildCompactionResumePrompt(
+  cwd: string,
   states: LoopState[],
   compactionEntryId?: string
 ): string {
   return buildLoopResumePrompt(
+    cwd,
     "Continue active pi-multiloop work after context compaction.",
     states,
     compactionEntryId
   );
 }
 
-export function buildAutoContinuePrompt(states: LoopState[]): string {
-  const contexts = states.map((state) => buildIterationContext(state)).join("\n\n");
+export function buildAutoContinuePrompt(cwd: string, states: LoopState[]): string {
+  const contexts = states
+    .map((state) => buildIterationContext(state, meshLinesFor(cwd, state)))
+    .join("\n\n");
   const nextActions = states.map(activeIterationSummary).join("\n");
   return [
     "Continue active pi-multiloop work.",
@@ -617,7 +636,7 @@ function registrySnapshot(loops: RegistryEntry[]): string {
 }
 
 export function buildTargetDisambiguationPrompt(
-  operation: "resume" | "pause" | "stop" | "archive",
+  operation: "resume" | "pause" | "stop" | "archive" | "inbox",
   target: string,
   resolution: TargetResolution,
   loops: RegistryEntry[]
@@ -1746,7 +1765,7 @@ export default function (pi: ExtensionAPI) {
       if (!outcome.ok) return textResult(outcome.reason);
       const state = outcome.state;
       markLoopTurn("tool-resume");
-      return textResult(`Resumed loop ${formatLaneId(resolution.id)} at iteration ${state.iteration}.\n\n${buildExplicitResumePrompt([state])}`);
+      return textResult(`Resumed loop ${formatLaneId(resolution.id)} at iteration ${state.iteration}.\n\n${buildExplicitResumePrompt(ctx.cwd, [state])}`);
     },
   });
 
@@ -1792,6 +1811,56 @@ export default function (pi: ExtensionAPI) {
         return textResult(buildTargetDisambiguationPrompt("archive", params.target, resolution, registry.loops));
       }
       return textResult(archiveLoopTarget(ctx, resolution.id));
+    },
+  });
+
+  const MeshSendParams = Type.Object({
+    from: Type.String({ description: "Sender loop: exact lane/run-tag" }),
+    to: Type.String({ description: "Recipient loop: exact lane/run-tag" }),
+    body: Type.String({ description: "Message body — a note, hint, or handoff for the recipient lane's next iteration" }),
+  });
+
+  pi.registerTool({
+    name: "multiloop_send",
+    label: "Multiloop Mesh Send",
+    description:
+      "Send a mesh message to another loop's mailbox. Delivery is file-based and one-way: the recipient drains its inbox at the start of its next iteration. Use for cross-lane hints, dead-end warnings, or handoffs.",
+    parameters: MeshSendParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const registry = readRegistry(ctx.cwd);
+      const fromResolution = resolveLoopTarget(registry.loops, params.from);
+      if (fromResolution.status !== "resolved") {
+        return textResult(`Sender not resolved: ${params.from}. Use exact lane/run-tag of a registered loop.`);
+      }
+      const toResolution = resolveLoopTarget(registry.loops, params.to);
+      if (toResolution.status !== "resolved") {
+        return textResult(`Recipient not resolved: ${params.to}. Use exact lane/run-tag of a registered loop.`);
+      }
+      const message = sendMessage(ctx.cwd, fromResolution.id, toResolution.id, params.body);
+      return textResult(`Mesh message delivered to ${message.to} at ${message.sentAt}. It will surface in that lane's next iteration context.`);
+    },
+  });
+
+  pi.registerTool({
+    name: "multiloop_inbox",
+    label: "Multiloop Mesh Inbox",
+    description:
+      "Read a loop's mesh mailbox without consuming it. Pending messages are also folded automatically into that lane's next iteration context.",
+    parameters: HumanOperationParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const registry = readRegistry(ctx.cwd);
+      const resolution = resolveLoopTarget(registry.loops, params.target);
+      if (resolution.status !== "resolved") {
+        return textResult(buildTargetDisambiguationPrompt("inbox", params.target, resolution, registry.loops));
+      }
+      const messages = readMessages(ctx.cwd, resolution.id);
+      if (messages.length === 0) {
+        return textResult(`Mesh inbox for ${formatLaneId(resolution.id)} is empty.`);
+      }
+      return textResult(
+        `Mesh inbox for ${formatLaneId(resolution.id)} (${messages.length} message(s)):\n` +
+        formatMessages(messages).join("\n")
+      );
     },
   });
 
@@ -1919,7 +1988,7 @@ export default function (pi: ExtensionAPI) {
         const state = outcome.state;
         ctx.ui.notify(`Resumed loop ${formatLaneId(resolution.id)} at iteration ${state.iteration}`, "info");
         markLoopTurn("explicit-resume");
-        pi.sendUserMessage(buildExplicitResumePrompt([state]), { deliverAs: "followUp" });
+        pi.sendUserMessage(buildExplicitResumePrompt(ctx.cwd, [state]), { deliverAs: "followUp" });
         return;
       }
 

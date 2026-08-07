@@ -7,6 +7,9 @@ import { createInitialState } from "../extensions/pi-multiloop/state.js";
 import { readRegistry, writeRegistry } from "../extensions/pi-multiloop/lanes.js";
 import type { RegistryEntry } from "../extensions/pi-multiloop/lanes.js";
 
+/** Shared scratch dir for prompt-builder tests; no mailbox is ever written for these lanes. */
+const TEST_CWD = mkdtempSync(join(tmpdir(), "multiloop-prompts-"));
+
 function activeState() {
   const state = createInitialState(
     { lane: "perf", runTag: "run-001" },
@@ -125,7 +128,7 @@ describe("buildResumableLoopsNotice", () => {
 
 describe("buildExplicitResumePrompt", () => {
   it("builds a loop-aware prompt for explicit resume", () => {
-    const prompt = buildExplicitResumePrompt([activeState()]);
+    const prompt = buildExplicitResumePrompt(TEST_CWD, [activeState()]);
 
     expect(prompt).toContain("Resume active pi-multiloop work from persisted state.");
     expect(prompt).toContain("## Active Loop: perf/run-001");
@@ -238,7 +241,7 @@ describe("buildAutoContinuePrompt", () => {
     state.currentMetric = null;
     state.bestMetric = null;
 
-    const prompt = buildAutoContinuePrompt([state]);
+    const prompt = buildAutoContinuePrompt(TEST_CWD, [state]);
 
     expect(prompt).toContain("Continue active pi-multiloop work.");
     expect(prompt).toContain("If the user asked a status question or other query, answer it first");
@@ -258,7 +261,7 @@ describe("buildAutoContinuePrompt", () => {
       measuredAt: "2026-05-07T00:01:00.000Z",
     };
 
-    const prompt = buildAutoContinuePrompt([state]);
+    const prompt = buildAutoContinuePrompt(TEST_CWD, [state]);
 
     expect(prompt).toContain("iteration 4 has measurements [356]");
     expect(prompt).toContain("multiloop_decide action=\"revert\"");
@@ -268,7 +271,7 @@ describe("buildAutoContinuePrompt", () => {
 
 describe("buildCompactionResumePrompt", () => {
   it("builds a loop-aware resume prompt after compaction", () => {
-    const prompt = buildCompactionResumePrompt([activeState()], "cmp-123");
+    const prompt = buildCompactionResumePrompt(TEST_CWD, [activeState()], "cmp-123");
 
     expect(prompt).toContain("Continue active pi-multiloop work after context compaction.");
     expect(prompt).toContain("Compaction entry: cmp-123");
@@ -284,7 +287,7 @@ describe("buildCompactionResumePrompt", () => {
   });
 
   it("omits the compaction entry line when unavailable", () => {
-    const prompt = buildCompactionResumePrompt([activeState()]);
+    const prompt = buildCompactionResumePrompt(TEST_CWD, [activeState()]);
 
     expect(prompt).not.toContain("Compaction entry:");
     expect(prompt).not.toContain("undefined");

@@ -62,8 +62,13 @@ export async function createChildAgentSession(
 	createSession: ChildAgentSessionFactory = createAgentSession,
 ): Promise<ChildAgentSession> {
 	const resourceLoader = createIsolatedResourceLoader(spec);
-	// No explicit reload here: createAgentSession reloads the loader internally
-	// (sdk.js), and a pre-reload would run package-manager discovery twice.
+	// createAgentSession only reloads a loader it constructs itself (sdk.js
+	// guards the reload behind `if (!resourceLoader)`), so a caller-supplied
+	// loader must be reloaded here — otherwise loadFinalExtensionSet never
+	// runs and inline extensionFactories are silently never invoked. Isolated
+	// loaders have noExtensions: true, so no package-manager discovery runs
+	// twice; the reload exists precisely to execute the injected factories.
+	await resourceLoader.reload();
 	const { session } = await createSession({
 		cwd: spec.cwd,
 		model: spec.model,

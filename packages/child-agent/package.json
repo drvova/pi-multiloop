@@ -4,6 +4,13 @@
   "description": "Shared isolated child-agent session core for pi subagents: session spawn, resource isolation, abort discipline, and report extraction.",
   "private": true,
   "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*"

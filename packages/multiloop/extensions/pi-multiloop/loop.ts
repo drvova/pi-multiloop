@@ -364,7 +364,7 @@ export function reanchor(cwd: string, id: LaneId): LoopState | null {
   return reconstructState(cwd, id);
 }
 
-export function buildIterationContext(state: LoopState, meshPeers: string[] = [], knowledge: string[] = []): string {
+export function buildIterationContext(state: LoopState, meshPeers: string[] = [], knowledge: string[] = [], peerResults: string[] = []): string {
   const lines: string[] = [];
   lines.push(`## Active Loop: ${state.lane}/${state.runTag}`);
   lines.push(`Mode: ${state.mode} | Iteration: ${state.iteration} | Status: ${state.status}`);
@@ -469,6 +469,11 @@ export function buildIterationContext(state: LoopState, meshPeers: string[] = []
   if (knowledge.length > 0) {
     lines.push(`Shared knowledge (${knowledge.length} entries from all lanes):`);
     lines.push(...knowledge);
+  }
+
+  if (peerResults.length > 0) {
+    lines.push(`Peer results (${peerResults.length} measured outcomes from sibling lanes — do not repeat measured regressions):`);
+    lines.push(...peerResults);
   }
 
   return lines.join("\n");

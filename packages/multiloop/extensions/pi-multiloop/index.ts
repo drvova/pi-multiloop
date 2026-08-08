@@ -48,6 +48,7 @@ import {
 } from "./loop.js";
 import { sendMessage, peekMessages, readMessages, formatMessages } from "./mesh.js";
 import { appendKnowledge, readKnowledge } from "./knowledge.js";
+import { readPeerResults, formatPeerResults } from "./peers.js";
 import { MODES, type LoopMode } from "./modes.js";
 import {
   MODE_ENTRY_TYPE,
@@ -336,6 +337,15 @@ function knowledgeLinesFor(cwd: string): string[] {
   return readKnowledge(cwd, KNOWLEDGE_PEEK_COUNT);
 }
 
+/** Number of sibling-lane measured outcomes folded into each iteration context. */
+const PEER_PEEK_COUNT = 15;
+
+/** Pre-rendered peer result lines for one lane, or [] when no sibling has measured yet. */
+function peerLinesFor(cwd: string, state: LoopState): string[] {
+  const peers = readPeerResults(cwd, { lane: state.lane, runTag: state.runTag }, PEER_PEEK_COUNT);
+  return peers.length === 0 ? [] : formatPeerResults(peers);
+}
+
 function buildLoopResumePrompt(
   cwd: string,
   heading: string,
@@ -344,7 +354,7 @@ function buildLoopResumePrompt(
 ): string {
   const contexts = states
     .map((state) =>
-      buildIterationContext(state, meshLinesFor(cwd, state), knowledgeLinesFor(cwd))
+      buildIterationContext(state, meshLinesFor(cwd, state), knowledgeLinesFor(cwd), peerLinesFor(cwd, state))
     )
     .join("\n\n");
   return [
@@ -387,7 +397,7 @@ export function buildCompactionResumePrompt(
 
 export function buildAutoContinuePrompt(cwd: string, states: LoopState[]): string {
   const contexts = states
-    .map((state) => buildIterationContext(state, meshLinesFor(cwd, state), knowledgeLinesFor(cwd)))
+    .map((state) => buildIterationContext(state, meshLinesFor(cwd, state), knowledgeLinesFor(cwd), peerLinesFor(cwd, state)))
     .join("\n\n");
   const nextActions = states.map(activeIterationSummary).join("\n");
   return [
@@ -645,7 +655,7 @@ function registrySnapshot(loops: RegistryEntry[]): string {
 }
 
 export function buildTargetDisambiguationPrompt(
-  operation: "resume" | "pause" | "stop" | "archive" | "inbox" | "publish",
+  operation: "resume" | "pause" | "stop" | "archive" | "inbox" | "publish" | "results",
   target: string,
   resolution: TargetResolution,
   loops: RegistryEntry[]
@@ -1893,6 +1903,31 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerTool({
+    name: "multiloop_results",
+    label: "Multiloop Peer Results",
+    description:
+      "Read the measured outcomes (keep/revert/log with a metric) of every sibling loop, excluding the target itself. Newest last. Use it to learn what peer lanes have already tried — and what regressed — before planning the next iteration. Peer results are also folded automatically into each lane's iteration context.",
+    parameters: Type.Object({
+      target: Type.String({ description: "Your loop: exact lane/run-tag (its own results are excluded)" }),
+      limit: Type.Optional(Type.Number({ description: "Max entries to return, most recent kept (default 15)" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const registry = readRegistry(ctx.cwd);
+      const resolution = resolveLoopTarget(registry.loops, params.target);
+      if (resolution.status !== "resolved") {
+        return textResult(buildTargetDisambiguationPrompt("results", params.target, resolution, registry.loops));
+      }
+      const peers = readPeerResults(ctx.cwd, resolution.id, params.limit ?? 15);
+      if (peers.length === 0) {
+        return textResult(`No measured peer results for ${formatLaneId(resolution.id)} yet — sibling lanes have not recorded a decided iteration.`);
+      }
+      return textResult(
+        `Peer results for ${formatLaneId(resolution.id)} (${peers.length} outcome(s), newest last):\n` +
+        formatPeerResults(peers).join("\n")
+      );
+    },
+  });
   pi.registerTool({
     name: "multiloop_compare",
     label: "Multiloop Compare",

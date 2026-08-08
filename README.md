@@ -48,6 +48,7 @@ pi-multiloop gives each loop its own **lane** so they can run side by side witho
 - **Loop subagents** — `multiloop_agent` spawns a loop into an isolated background subagent that inherits your session's model: live fleet widget, completion notifications, mid-run steering, and result/stop/list management tools
 - **Mesh mailbox** — `multiloop_send` posts a note to another lane's inbox; `multiloop_inbox` reads it. Messages surface automatically in the recipient's next iteration context as a "Mesh inbox" block, so sibling lanes share dead-end warnings and breakthrough hints without live IPC — the mailbox file is the channel, mirroring the role `results.jsonl` plays for metrics
 - **Shared knowledge board** — `multiloop_publish` distills a durable lesson (dead end, saturation point, verifier gotcha) to `.multiloop/shared/knowledge.md`; every lane's future iteration context carries it under "Shared knowledge". Pivot lessons are mirrored automatically, so the board fills even if nobody publishes by hand
+- **Peer results** — `multiloop_results` reads sibling lanes' decided outcomes (keep/revert/log with a metric), newest last, excluding the caller's own lane; the same bounded tail folds into every iteration context as a "Peer results" block, so a lane never repeats a regression another lane already measured. Read-only, file-based — the shared-journal pattern (Optuna's JournalStorage), no live IPC
 
 ## Install
 

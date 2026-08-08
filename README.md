@@ -51,6 +51,7 @@ pi-multiloop gives each loop its own **lane** so they can run side by side witho
 - **Shared knowledge board** — `multiloop_publish` distills a durable lesson (dead end, saturation point, verifier gotcha) to `.multiloop/shared/knowledge.md`; every lane's future iteration context carries it under "Shared knowledge". Pivot lessons are mirrored automatically, so the board fills even if nobody publishes by hand
 - **Peer results** — `multiloop_results` reads sibling lanes' decided outcomes (keep/revert/log with a metric), newest last, excluding the caller's own lane; the same bounded tail folds into every iteration context as a "Peer results" block, so a lane never repeats a regression another lane already measured. Read-only, file-based — the shared-journal pattern (Optuna's JournalStorage), no live IPC
 - **Swarm pulse (proprioception)** — the live widget, `/multiloop status`, and the `multiloop_pulse` tool all render one swarm block: live lanes, pending mesh traffic, knowledge-board size and latest entry, and pending proposals. Pure reads, no new state — agents and humans see the same truth
+- **Regression sentinel (immune system)** — `/multiloop sentinel` re-runs every completed/archived champion's verify command once and compares the fresh measurement against the champion's own recorded noise band (the MAD behind its keep, same `isImprovement` statistics the engine trusts). A gain that no longer holds posts one immune signal to the shared knowledge board, so every live lane inherits the wound. Pure reads + the extension-owned executor — it cannot break a loop because it never drives one
 - **Swarm homeostasis** — when a lane reaches its target metric, the extension broadcasts one `CONVERGED` mesh message to every active sibling (surfacing in their next iteration context), so the swarm stops or retargets instead of burning iterations after the goal is met; and a low-confidence improvement (MAD) is mechanically downgraded from keep to log with a remeasure directive — noisy data never becomes a permanent change or a sibling's peer result
 
 ## Install
@@ -244,6 +245,31 @@ live widget / /multiloop status / multiloop_pulse
     latest mesh from perf/run-1: verify flaky under load
     proposal #2 from quant/run-2: lane "deps" — /multiloop approve 2 to start it
 ```
+## Regression sentinel — the organism's immune system
+
+Pulse perceives the swarm as it *is*; the sentinel perceives what it has
+*become*. Every completed or archived run leaves its verify command and
+champion metric on disk. A sweep re-runs that command once per champion and
+compares the fresh measurement against the champion's own recorded noise
+band — the gain must still hold, or the organism admits the wound.
+
+```
+/multiloop sentinel [lane]        multiloop_sentinel (parent-only)
+          │
+          ▼   registry: completed/archived champions only — live lanes measure themselves
+   re-run each verifyCommand once (extension-owned executor, same as auditVerifier)
+          ▼
+   fresh metric vs the champion's own MAD band
+          │
+   ┌──────┼───────────┐
+ holds  improved   regressed ──▶ one immune signal on knowledge.md
+                                 (every live lane sees it next iteration)
+```
+
+A regression means the world moved — a dependency bump, data growth, an
+environment change — not that the loop lied. Run it headless too:
+`pi -p "call multiloop_sentinel"`. Deterministic champions (no recorded
+measurements) have a zero-width band: any drift at all is significant.
 
 ## Modes
 

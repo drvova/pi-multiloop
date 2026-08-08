@@ -15,7 +15,11 @@ import { MULTILOOP_TOOLS } from "../../multiloop-agent/extensions/multiloop-agen
  */
 // Approval is parent-session authority by construction: a fleet child that
 // could approve its own proposals would make the gate decorative.
-const PARENT_ONLY_TOOLS: string[] = ["multiloop_approve", "multiloop_reject"];
+// The sentinel is parent-only for the same reason the approve gate is: it
+// executes every champion's verify command and writes immune signals to the
+// shared board — swarm-wide re-measurement is the parent's call, not a whim
+// N children may each indulge.
+const PARENT_ONLY_TOOLS: string[] = ["multiloop_approve", "multiloop_reject", "multiloop_sentinel"];
 
 function registeredMultiloopTools(): string[] {
   const tools: string[] = [];

@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Added
+- Added the **regression sentinel** — the organism's immune system over time.
+  `sentinel.ts` sweeps completed/archived registry entries, re-runs each
+  champion's verify command once through the extension-owned executor, and
+  compares the fresh measurement against the champion's own recorded noise
+  band (MAD of the measurements that backed its keep, via the engine's own
+  `isImprovement` statistics; zero-width band for deterministic champions).
+  A significant regression appends one immune signal to the shared knowledge
+  board so every live lane's next iteration context carries the wound.
+  Surfaced as the parent-only `multiloop_sentinel` tool (fleet children can't
+  trigger swarm-wide re-measurement — documented in PARENT_ONLY_TOOLS),
+  `/multiloop sentinel [lane]`, and usable headless via `pi -p`. Read-only
+  toward loop state: it measures and remembers, it never drives a loop.
 - Added the **swarm pulse**: a shared perception layer over the whole
   organism. `buildSwarmLines` renders one block — live lanes, pending mesh
   traffic, knowledge-board size and latest entry, pending proposals — into

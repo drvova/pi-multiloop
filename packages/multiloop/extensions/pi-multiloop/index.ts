@@ -56,6 +56,7 @@ import {
   pendingProposals,
   formatProposals,
 } from "./proposals.js";
+import { runSentinel } from "./sentinel.js";
 import { MODES, type LoopMode } from "./modes.js";
 import {
   MODE_ENTRY_TYPE,
@@ -2124,6 +2125,19 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerTool({
+    name: "multiloop_sentinel",
+    label: "Multiloop Sentinel",
+    description:
+      "Immune system sweep, parent-session authority: re-runs the verify command of every completed/archived champion once, compares the fresh measurement against the champion's own recorded noise band (MAD), and posts a regression signal to the shared knowledge board when a gain no longer holds. It measures and remembers — it never mutates a loop.",
+    parameters: Type.Object({
+      target: Type.Optional(Type.String({ description: "Watch one champion: lane name or lane/run-tag. Omit to sweep all completed/archived runs." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      return textResult(runSentinel(ctx.cwd, params.target));
+    },
+  });
+
   function showStatus(ctx: ExtensionCommandContext) {
     const running = runningStates();
     if (running.length > 0) {
@@ -2311,6 +2325,16 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      if (trimmed === "sentinel" || trimmed.startsWith("sentinel ")) {
+        const target = trimmed.replace(/^sentinel\s*/, "").trim() || undefined;
+        pi.sendMessage({
+          customType: "multiloop-sentinel",
+          content: runSentinel(ctx.cwd, target),
+          display: true,
+        });
+        return;
+      }
+
       if (trimmed === "archive" || trimmed.startsWith("archive ")) {
         const archiveArgs = trimmed.replace(/^archive\s*/, "").trim();
         await archiveHandler(archiveArgs, ctx);
@@ -2418,6 +2442,7 @@ export default function (pi: ExtensionAPI) {
             "  guide            Launch the setup guide for a new high-quality loop",
             "  resume <id>      Resume a stopped/paused loop",
             "  archive [id]     Archive completed loops (all by default)",
+            "  sentinel [id]    Re-measure completed/archived champions; post regressions to the knowledge board",
             "  rm <id>          Delete a loop and its state files",
             "  help             Show this help",
             "",

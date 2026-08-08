@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
 import { loadState, type LoopState, type VerificationCheck } from "./state.js";
@@ -24,16 +24,44 @@ export function hashFile(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-/** Content hashes of repo-relative protected paths, resolved against cwd. */
+/**
+ * Content hashes of repo-relative protected paths, resolved against cwd.
+ * Every path must be a regular file (or missing — a legal protected state):
+ * the hasher reads bytes and a directory throws EISDIR, so reject here at the
+ * choke point rather than let it surface mid-iteration (Poka-Yoke).
+ */
 export function snapshotProtectedHashes(
   cwd: string,
   paths: string[]
 ): Record<string, string> {
+  const invalid = findInvalidProtectedPaths(cwd, paths);
+  if (invalid.length > 0) {
+    throw new Error(
+      `protectedPaths must be regular files, not directories: ${invalid.join(", ")}. Expand directories to the explicit files to protect.`
+    );
+  }
   const snapshot: Record<string, string> = {};
   for (const path of paths) {
     snapshot[path] = hashFile(resolve(cwd, path));
   }
   return snapshot;
+}
+
+/**
+ * Protected paths must be regular files: the hasher reads bytes, and a
+ * directory throws EISDIR mid-iteration, poisoning the whole run. Validate
+ * launch, not merely caught late. Called by snapshotProtectedHashes at every
+ * write seam (start, resume). Returns the offending paths, [] when all
+ * are files (or missing — a missing file is a legal protected state).
+ */
+export function findInvalidProtectedPaths(
+  cwd: string,
+  paths: string[]
+): string[] {
+  return paths.filter((path) => {
+    const resolved = resolve(cwd, path);
+    return existsSync(resolved) && !statSync(resolved).isFile();
+  });
 }
 
 /**

@@ -300,6 +300,15 @@ export async function main() {
       // outcome.exited already tells whether the process ended; do not await
       // `exited` again — a child that survived the reap would hang the driver.
       if (outcome.exited) {
+        // A session that exits without recording may still have finished the
+        // work: the extension completes loops mid-session (target met, then
+        // idle), and no new iteration is recorded because none is needed.
+        // Distinguish completion from a dead session before blaming the child.
+        const latest = readLoopState(repo, entry);
+        if (latest.status === "completed" || latest.status === "stopped") {
+          console.log(`multiloop-run: loop ${latest.status} during iteration ${nextIteration} — no further iteration required`);
+          return 0;
+        }
         console.error(`multiloop-run: session for iteration ${nextIteration} exited without recording the iteration`);
       } else {
         console.error(`multiloop-run: iteration ${nextIteration} timed out after ${opts.timeoutSec}s with no recorded result`);

@@ -13,7 +13,9 @@ import { MULTILOOP_TOOLS } from "../../multiloop-agent/extensions/multiloop-agen
  * If a future tool is genuinely parent-only, exclude it explicitly in
  * PARENT_ONLY_TOOLS so the decision is documented in code, not implicit.
  */
-const PARENT_ONLY_TOOLS: string[] = [];
+// Approval is parent-session authority by construction: a fleet child that
+// could approve its own proposals would make the gate decorative.
+const PARENT_ONLY_TOOLS: string[] = ["multiloop_approve", "multiloop_reject"];
 
 function registeredMultiloopTools(): string[] {
   const tools: string[] = [];

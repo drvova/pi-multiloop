@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- Added **lane proposals** — speciation with an approval gate. Workers file
+  structured proposals (`multiloop_propose_lane`) for orthogonal work
+  discovered mid-loop instead of starting lanes themselves; proposals land in
+  `.multiloop/shared/proposals.json` and surface in parent-facing prompts.
+  `multiloop_approve` (or `/multiloop approve <id>`) starts the lane through
+  the standard startLoop path, bounded by the proposer's maxIterations budget;
+  `multiloop_reject` closes the loop with a mesh message to the proposer.
+  Pending ceiling (5) and one-pending-per-lane are enforced mechanically.
+  Approval tools are parent-only — the fleet allowlist sync test documents
+  the exclusion so a child can never approve its own proposals.
 - Added the **shared knowledge board** (`.multiloop/shared/knowledge.md`) —
   the durable, undirected quadrant of the loop memory map. `multiloop_publish`
   appends a distilled, attributed lesson; every lane's iteration context

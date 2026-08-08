@@ -49,6 +49,13 @@ import {
 import { sendMessage, peekMessages, readMessages, formatMessages } from "./mesh.js";
 import { appendKnowledge, readKnowledge } from "./knowledge.js";
 import { readPeerResults, formatPeerResults } from "./peers.js";
+import {
+  proposeLane,
+  resolveProposal,
+  readProposals,
+  pendingProposals,
+  formatProposals,
+} from "./proposals.js";
 import { MODES, type LoopMode } from "./modes.js";
 import {
   MODE_ENTRY_TYPE,
@@ -337,6 +344,13 @@ function knowledgeLinesFor(cwd: string): string[] {
   return readKnowledge(cwd, KNOWLEDGE_PEEK_COUNT);
 }
 
+/** Pending lane-proposal lines for the parent session, or [] when none. Workers propose; only this surface approves. */
+function proposalLinesFor(cwd: string): string[] {
+  const pending = pendingProposals(cwd);
+  if (pending.length === 0) return [];
+  return ["", `Lane proposals (${pending.length} pending — approving starts a new bounded lane):`, ...formatProposals(pending)];
+}
+
 /** Number of sibling-lane measured outcomes folded into each iteration context. */
 const PEER_PEEK_COUNT = 15;
 
@@ -366,6 +380,7 @@ function buildLoopResumePrompt(
     "A verification is recorded only after multiloop_measure persists it; an iteration is complete only after multiloop_decide or multiloop_log updates state/results.",
     "",
     contexts,
+    ...proposalLinesFor(cwd),
     "",
     "Next:",
     "- If baseline is missing, run the verify command and call multiloop_measure to persist it.",
@@ -410,6 +425,7 @@ export function buildAutoContinuePrompt(cwd: string, states: LoopState[]): strin
     "- A bash verify output alone is not recorded; persist measurements and all mechanical/prompt check verdicts through multiloop_measure.",
     "",
     contexts,
+    ...proposalLinesFor(cwd),
     "",
     "Required next action:",
     nextActions,
@@ -655,7 +671,7 @@ function registrySnapshot(loops: RegistryEntry[]): string {
 }
 
 export function buildTargetDisambiguationPrompt(
-  operation: "resume" | "pause" | "stop" | "archive" | "inbox" | "publish" | "results",
+  operation: "resume" | "pause" | "stop" | "archive" | "inbox" | "publish" | "results" | "propose",
   target: string,
   resolution: TargetResolution,
   loops: RegistryEntry[]
@@ -1883,6 +1899,123 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  /** System sender identity for mesh messages about proposal resolutions. */
+  const SYSTEM_LANE: LaneId = { lane: "multiloop", runTag: "system" };
+
+  /** Approve a pending proposal: start the lane through the same startLoop path multiloop_start uses. */
+  function approveProposalById(ctx: ExtensionContext | ExtensionCommandContext, id: number): string {
+    const pending = pendingProposals(ctx.cwd);
+    const proposal = pending.find((prop) => prop.id === id);
+    if (!proposal) {
+      const existing = readProposals(ctx.cwd).find((prop) => prop.id === id);
+      return existing
+        ? `Proposal #${id} is already ${existing.status}.`
+        : `No proposal #${id}. Pending: ${pending.map((prop) => `#${prop.id}`).join(", ") || "none"}.`;
+    }
+    if (!(proposal.mode in MODES)) {
+      return `Cannot approve #${id}: unknown mode "${proposal.mode}" (a hand-edited proposals.json is not a launch config).`;
+    }
+    const registry = readRegistry(ctx.cwd);
+    const collision = registry.loops.find(
+      (loop) => loop.lane === proposal.lane && (loop.status === "active" || loop.status === "paused")
+    );
+    if (collision) {
+      return `Cannot approve #${id}: lane "${proposal.lane}" is already ${collision.status} (${collision.runTag}). Reject the proposal or stop the existing lane first.`;
+    }
+    const state = startLoop(ctx, {
+      lane: proposal.lane,
+      mode: proposal.mode as LoopMode,
+      goal: proposal.goal,
+      verifyCommand: proposal.verifyCommand,
+      maxIterations: proposal.maxIterations,
+      metricDirection: proposal.metricDirection,
+    });
+    const started = formatLaneId({ lane: state.lane, runTag: state.runTag });
+    resolveProposal(ctx.cwd, id, "approved", `started as ${started}`);
+    const proposer = parseLaneId(proposal.from);
+    if (proposer) {
+      sendMessage(ctx.cwd, SYSTEM_LANE, proposer, `Proposal #${id} approved: lane ${started} started.`);
+    }
+    markLoopTurn("proposal-approved");
+    return `Proposal #${id} approved — started ${state.mode} loop ${started} (proposed by ${proposal.from}).\n\n${buildLoopStartPrompt(state)}`;
+  }
+
+  function rejectProposalById(ctx: ExtensionContext | ExtensionCommandContext, id: number, reason?: string): string {
+    const result = resolveProposal(ctx.cwd, id, "rejected", reason);
+    if (!result.ok) return result.reason;
+    const proposer = parseLaneId(result.proposal.from);
+    if (proposer) {
+      sendMessage(ctx.cwd, SYSTEM_LANE, proposer, `Proposal #${id} rejected${reason ? `: ${reason}` : "."}`);
+    }
+    return `Proposal #${id} rejected${reason ? ` (${reason})` : ""}. The proposer was notified via mesh.`;
+  }
+
+  pi.registerTool({
+    name: "multiloop_propose_lane",
+    label: "Multiloop Propose Lane",
+    description:
+      "Propose a new loop lane for orthogonal work discovered mid-loop. Workers drive exactly one loop — never start another lane yourself; file the proposal instead. It lands in .multiloop/shared/proposals.json and surfaces in the parent session; a human approves with /multiloop approve <id>, and only then does the lane start, bounded by your maxIterations budget. The rationale should cite what you measured — your lane's results are the evidence.",
+    parameters: Type.Object({
+      target: Type.String({ description: "Your loop: exact lane/run-tag (the proposer, for attribution and evidence)" }),
+      lane: Type.String({ description: "Name for the proposed lane" }),
+      mode: Type.Union([Type.Literal("optimize"), Type.Literal("punchlist"), Type.Literal("research"), Type.Literal("dev")]),
+      goal: Type.String({ description: "What the new lane should accomplish" }),
+      verifyCommand: Type.String({ description: "Command that produces the new lane's metric" }),
+      rationale: Type.String({ description: "The measured evidence that justifies a new lane" }),
+      maxIterations: Type.Optional(Type.Number({ description: "Cost bound for the new lane (becomes its maxIterations)" })),
+      metricDirection: Type.Optional(Type.Union([Type.Literal("lower"), Type.Literal("higher")])),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const registry = readRegistry(ctx.cwd);
+      const resolution = resolveLoopTarget(registry.loops, params.target);
+      if (resolution.status !== "resolved") {
+        return textResult(buildTargetDisambiguationPrompt("propose", params.target, resolution, registry.loops));
+      }
+      const result = proposeLane(ctx.cwd, resolution.id, params);
+      if (!result.ok) return textResult(`Proposal refused: ${result.reason}`);
+      return textResult(`Proposal #${result.proposal.id} filed for lane "${result.proposal.lane}". It surfaces in the parent session on its next wake; nothing starts until a human approves it.`);
+    },
+  });
+
+  pi.registerTool({
+    name: "multiloop_proposals",
+    label: "Multiloop Proposals",
+    description: "List lane proposals (pending, approved, rejected). Read-only.",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const all = readProposals(ctx.cwd);
+      if (all.length === 0) return textResult("No lane proposals.");
+      const lines = all.map((prop) =>
+        `#${prop.id} [${prop.status}] ${prop.lane} (${prop.mode}) from ${prop.from}: ${prop.goal}${prop.resolveNote ? ` — ${prop.resolveNote}` : ""}`
+      );
+      return textResult(lines.join("\n"));
+    },
+  });
+
+  pi.registerTool({
+    name: "multiloop_approve",
+    label: "Multiloop Approve Proposal",
+    description:
+      "Approve a pending lane proposal: starts the proposed lane (bounded by its budget) through the standard startLoop path. Parent-session authority — fleet children do not have this tool.",
+    parameters: Type.Object({ id: Type.Number({ description: "Proposal id to approve" }) }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      return textResult(approveProposalById(ctx, params.id));
+    },
+  });
+
+  pi.registerTool({
+    name: "multiloop_reject",
+    label: "Multiloop Reject Proposal",
+    description: "Reject a pending lane proposal with an optional reason; the proposer is notified via mesh.",
+    parameters: Type.Object({
+      id: Type.Number({ description: "Proposal id to reject" }),
+      reason: Type.Optional(Type.String({ description: "Why the proposal is rejected" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      return textResult(rejectProposalById(ctx, params.id, params.reason));
+    },
+  });
+
   pi.registerTool({
     name: "multiloop_publish",
     label: "Multiloop Publish Knowledge",
@@ -2181,6 +2314,32 @@ export default function (pi: ExtensionAPI) {
 
       if (trimmed === "guide" || trimmed === "wizard" || trimmed === "setup") {
         pi.sendUserMessage(buildSetupGuidePrompt(), { deliverAs: "followUp" });
+        return;
+      }
+
+      if (trimmed === "approve" || trimmed.startsWith("approve ")) {
+        const arg = Number(trimmed.replace(/^approve\s*/, "").trim());
+        if (!Number.isInteger(arg)) {
+          ctx.ui.notify("Usage: /multiloop approve <proposal-id>", "error");
+          return;
+        }
+        const message = approveProposalById(ctx, arg);
+        ctx.ui.notify(message.split("\n")[0], "info");
+        if (message.includes("\n\n")) {
+          pi.sendUserMessage(message, { deliverAs: "followUp" });
+        }
+        return;
+      }
+
+      if (trimmed === "reject" || trimmed.startsWith("reject ")) {
+        const rest = trimmed.replace(/^reject\s*/, "").trim();
+        const [idPart, ...reasonParts] = rest.split(/\s+/);
+        const arg = Number(idPart);
+        if (!Number.isInteger(arg)) {
+          ctx.ui.notify("Usage: /multiloop reject <proposal-id> [reason]", "error");
+          return;
+        }
+        ctx.ui.notify(rejectProposalById(ctx, arg, reasonParts.join(" ") || undefined), "info");
         return;
       }
 

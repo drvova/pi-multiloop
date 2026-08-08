@@ -47,6 +47,7 @@ import {
   applyLogIteration,
 } from "./loop.js";
 import { sendMessage, peekMessages, readMessages, formatMessages } from "./mesh.js";
+import { appendKnowledge, readKnowledge } from "./knowledge.js";
 import { MODES, type LoopMode } from "./modes.js";
 import {
   MODE_ENTRY_TYPE,
@@ -327,6 +328,14 @@ function meshLinesFor(cwd: string, state: LoopState): string[] {
   return pending.length === 0 ? [] : formatMessages(pending);
 }
 
+/** Number of shared-knowledge entries folded into each iteration context. */
+const KNOWLEDGE_PEEK_COUNT = 15;
+
+/** Pre-rendered shared knowledge lines, or [] when the board is empty. */
+function knowledgeLinesFor(cwd: string): string[] {
+  return readKnowledge(cwd, KNOWLEDGE_PEEK_COUNT);
+}
+
 function buildLoopResumePrompt(
   cwd: string,
   heading: string,
@@ -335,7 +344,7 @@ function buildLoopResumePrompt(
 ): string {
   const contexts = states
     .map((state) =>
-      buildIterationContext(state, meshLinesFor(cwd, state))
+      buildIterationContext(state, meshLinesFor(cwd, state), knowledgeLinesFor(cwd))
     )
     .join("\n\n");
   return [
@@ -378,7 +387,7 @@ export function buildCompactionResumePrompt(
 
 export function buildAutoContinuePrompt(cwd: string, states: LoopState[]): string {
   const contexts = states
-    .map((state) => buildIterationContext(state, meshLinesFor(cwd, state)))
+    .map((state) => buildIterationContext(state, meshLinesFor(cwd, state), knowledgeLinesFor(cwd)))
     .join("\n\n");
   const nextActions = states.map(activeIterationSummary).join("\n");
   return [
@@ -636,7 +645,7 @@ function registrySnapshot(loops: RegistryEntry[]): string {
 }
 
 export function buildTargetDisambiguationPrompt(
-  operation: "resume" | "pause" | "stop" | "archive" | "inbox",
+  operation: "resume" | "pause" | "stop" | "archive" | "inbox" | "publish",
   target: string,
   resolution: TargetResolution,
   loops: RegistryEntry[]
@@ -1861,6 +1870,26 @@ export default function (pi: ExtensionAPI) {
         `Mesh inbox for ${formatLaneId(resolution.id)} (${messages.length} message(s)):\n` +
         formatMessages(messages).join("\n")
       );
+    },
+  });
+
+  pi.registerTool({
+    name: "multiloop_publish",
+    label: "Multiloop Publish Knowledge",
+    description:
+      "Publish a distilled lesson to the shared knowledge board (.multiloop/shared/knowledge.md). Unlike multiloop_send (directed, one recipient), knowledge is durable and undirected: every lane's future iteration context carries it. Publish dead ends, saturation points, and verifier gotchas — not transient status. Pivot lessons are mirrored here automatically.",
+    parameters: Type.Object({
+      target: Type.String({ description: "Your loop: exact lane/run-tag (used for attribution)" }),
+      lesson: Type.String({ description: "The distilled lesson, one line — what every lane should know" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const registry = readRegistry(ctx.cwd);
+      const resolution = resolveLoopTarget(registry.loops, params.target);
+      if (resolution.status !== "resolved") {
+        return textResult(buildTargetDisambiguationPrompt("publish", params.target, resolution, registry.loops));
+      }
+      appendKnowledge(ctx.cwd, resolution.id, params.lesson);
+      return textResult(`Published to the shared knowledge board, attributed to ${formatLaneId(resolution.id)}. It will surface in every lane's next iteration context.`);
     },
   });
 

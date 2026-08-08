@@ -47,6 +47,7 @@ pi-multiloop gives each loop its own **lane** so they can run side by side witho
 - **Champion comparison** — `multiloop_compare` (or `/multiloop compare perf mem`) renders two runs side by side with a champion verdict, reading archived runs too: offline champion-challenger evaluation on frozen history, with zero cross-lane writes
 - **Loop subagents** — `multiloop_agent` spawns a loop into an isolated background subagent that inherits your session's model: live fleet widget, completion notifications, mid-run steering, and result/stop/list management tools
 - **Mesh mailbox** — `multiloop_send` posts a note to another lane's inbox; `multiloop_inbox` reads it. Messages surface automatically in the recipient's next iteration context as a "Mesh inbox" block, so sibling lanes share dead-end warnings and breakthrough hints without live IPC — the mailbox file is the channel, mirroring the role `results.jsonl` plays for metrics
+- **Shared knowledge board** — `multiloop_publish` distills a durable lesson (dead end, saturation point, verifier gotcha) to `.multiloop/shared/knowledge.md`; every lane's future iteration context carries it under "Shared knowledge". Pivot lessons are mirrored automatically, so the board fills even if nobody publishes by hand
 
 ## Install
 
@@ -128,6 +129,13 @@ subagents, and detached headless runs. A fleet-tools sync test enforces that
 the mesh tools stay in the child allowlist (the seam failed once; it is now
 immune).
 
+Mesh is directed and transient — "you should know this soon." For lessons
+*everyone* should keep forever, `multiloop_publish` writes to the shared
+knowledge board (`.multiloop/shared/knowledge.md`), rendered as a "Shared
+knowledge" block in every lane's iteration context. Pivot lessons mirror
+there automatically; the board is what turns parallel loops into a learning
+system instead of N independent searches.
+
 ## Modes
 
 | Mode | What it does | Best for |
@@ -186,6 +194,8 @@ All state lives in `.multiloop/` at your repo root:
 │   ├── state.json         # resume snapshot
 │   ├── lessons.md         # strategy notes (optional)
 │   └── mesh.jsonl         # inter-lane inbox (optional)
+├── shared/
+│   └── knowledge.md       # durable cross-lane lessons (optional)
 └── archive/               # archived runs
 ```
 

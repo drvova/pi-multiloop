@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Added the **shared knowledge board** (`.multiloop/shared/knowledge.md`) —
+  the durable, undirected quadrant of the loop memory map. `multiloop_publish`
+  appends a distilled, attributed lesson; every lane's iteration context
+  carries the last 15 entries under "Shared knowledge". Pivot lessons mirror
+  automatically at the `applyDecision` seam, so the board fills even when no
+  agent publishes by hand. The fleet allowlist and Loop Runner prompt include
+  `multiloop_publish` (the sync test enforced it).
 - Added **mesh mailbox**: file-based inter-lane messaging via `multiloop_send`
   and `multiloop_inbox`. Each lane owns an append-only `mesh.jsonl` mailbox;
   messages surface automatically as a "Mesh inbox" block in the recipient's

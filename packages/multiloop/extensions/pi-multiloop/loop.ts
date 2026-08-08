@@ -22,6 +22,7 @@ import {
   formatDelta,
 } from "./metrics.js";
 import { updateLoopStatus, formatLaneId } from "./lanes.js";
+import { appendKnowledge } from "./knowledge.js";
 import { resolveAcceptanceMode } from "./verifiers.js";
 
 export interface LoopDecision {
@@ -334,6 +335,9 @@ export function applyDecision(
       state.consecutiveFailures = 0;
       const lesson = `Pivot ${state.pivotCount}: Previous approach exhausted after ${PIVOT_THRESHOLD} failures.`;
       appendLesson(cwd, id, lesson);
+      // Mirror to the shared board: a pivot is distilled learning every lane
+      // should inherit, not a per-lane note that dies with the run.
+      appendKnowledge(cwd, id, lesson);
       state.lastLesson = lesson;
     }
   } else if (decision.action === "log") {
@@ -360,7 +364,7 @@ export function reanchor(cwd: string, id: LaneId): LoopState | null {
   return reconstructState(cwd, id);
 }
 
-export function buildIterationContext(state: LoopState, meshPeers: string[] = []): string {
+export function buildIterationContext(state: LoopState, meshPeers: string[] = [], knowledge: string[] = []): string {
   const lines: string[] = [];
   lines.push(`## Active Loop: ${state.lane}/${state.runTag}`);
   lines.push(`Mode: ${state.mode} | Iteration: ${state.iteration} | Status: ${state.status}`);
@@ -460,6 +464,11 @@ export function buildIterationContext(state: LoopState, meshPeers: string[] = []
   if (meshPeers.length > 0) {
     lines.push(`Mesh inbox (${meshPeers.length} pending from sibling lanes):`);
     lines.push(...meshPeers);
+  }
+
+  if (knowledge.length > 0) {
+    lines.push(`Shared knowledge (${knowledge.length} entries from all lanes):`);
+    lines.push(...knowledge);
   }
 
   return lines.join("\n");

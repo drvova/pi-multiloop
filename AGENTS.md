@@ -42,6 +42,8 @@ All state lives in a single `.multiloop/` directory at repo root:
 │   ├── results.jsonl    # Append-only iteration log
 │   ├── state.json       # Resume snapshot
 │   └── lessons.md       # Cross-run learning (optional)
+├── shared/
+│   └── knowledge.md     # Durable cross-lane lessons (optional)
 └── archive/             # Completed loops moved here
 ```
 

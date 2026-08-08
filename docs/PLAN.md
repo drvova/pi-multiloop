@@ -35,7 +35,7 @@ What exists vs. what we need:
 | Dev mode (implement→test→commit) | No | No | Yes |
 | Durable JSONL history | No (.jsonl but coupled) | Partial (TSV) | Yes |
 | Lane isolation | No | Yes (path-based) | Yes |
-| Shared results between loops | No | No | Planned (v0.2) |
+| Shared results between loops | No | No | Yes |
 | CI/exec non-interactive mode | No | Yes | Yes (`packages/multiloop-run/bin/multiloop-run.mjs`) |
 | TUI dashboard | Yes | No | Yes |
 | Escalation on consecutive failures | No | Yes | Yes |

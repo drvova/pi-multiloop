@@ -46,6 +46,19 @@
   next iteration context. Stigmergy over live IPC — the mailbox file is the
   channel, mirroring `results.jsonl` for metrics. Works across interactive,
   fleet, and detached paths.
+- Added **cross-lane peer results** — shared-journal learning via
+  `multiloop_results`. A lane reads its siblings' decided outcomes
+  (keep/revert/log with a metric), newest last, excluding its own; the same
+  bounded tail folds into every iteration context as a "Peer results" block,
+  so no lane repeats a regression another lane already measured. Read-only
+  and file-based — the shared-journal pattern, no live IPC.
+- Added **swarm homeostasis** — convergence broadcast and a confidence gate.
+  When a lane reaches its target metric, the extension broadcasts one
+  `CONVERGED` mesh message to every active sibling so the swarm stops or
+  retargets instead of burning iterations after the goal is met; and in
+  `decide()` a low-confidence improvement (MAD noise too high) is mechanically
+  downgraded from keep to log with a remeasure directive — noisy data never
+  becomes a permanent change or a sibling's peer result.
 - Added **fleet immune checks**: `fleet-tools.test.ts` enforces exact set sync
   between the extension's registered `multiloop_*` tools and the fleet child
   allowlist (`MULTILOOP_TOOLS`) — a tool added to the extension but not

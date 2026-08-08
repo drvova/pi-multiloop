@@ -84,6 +84,20 @@ pi install git:https://github.com/drvova/pi-multiloop
 your current model and runs the whole cadence itself — start, iterate,
 measure, decide — until the stop condition, then reports back:
 
+```
+your session                    child Pi session (isolated)
+┌─────────────────┐             ┌──────────────────────────────┐
+│ multiloop_agent ├──── spawn ─▶│ Loop Runner: start → iterate │
+│                 │             │ → measure → decide → … done  │
+│  steer ─────────┼────────────▶│ (mesh, knowledge, peers,     │
+│  result/stop    │             │  propose — full tool set)    │
+│  fleet widget ◀─┼── progress  └──────────────┬───────────────┘
+└────────┬────────┘   report ◀──┬──────────────┘
+         │                      │ both read/write
+         ▼                      ▼
+              .multiloop/  (one shared state substrate)
+```
+
 ```json
 {
   "goal": "Reduce bundle size",
@@ -119,6 +133,15 @@ automatically as a **Mesh inbox** block in the recipient's next iteration
 context — no live IPC, no sockets, no race conditions. The mailbox file is the
 channel, mirroring the role `results.jsonl` plays for metrics.
 
+```
+lane "perf"                                         lane "quant"
+    │                                                    ▲
+    │  multiloop_send                                    │  its next iteration context:
+    ▼                                                    │  "Mesh inbox (1 pending):"
+  .multiloop/active/quant/<run>/mesh.jsonl  ─────────────┘
+    (append-only mailbox — the file is the channel)
+```
+
 ```bash
 # Lane "perf" warns lane "quant" about a flaky verify command
 multiloop_send from="perf/run-001" to="quant/run-002" body="verify is flaky under load — add --retry 3"
@@ -133,12 +156,74 @@ the mesh tools stay in the child allowlist (the seam failed once; it is now
 immune).
 
 Mesh is directed and transient — "you should know this soon." For lessons
-*everyone* should keep forever, `multiloop_publish` writes to the shared
-knowledge board (`.multiloop/shared/knowledge.md`), rendered as a "Shared
-knowledge" block in every lane's iteration context. Pivot lessons mirror
-there automatically; the board is what turns parallel loops into a learning
-system instead of N independent searches.
+everyone should keep forever, see the knowledge board below.
 
+## Peer results — learn from measured outcomes, not just prose
+
+Every lane's `results.jsonl` is an append-only journal of *decided* iterations
+(metric + keep/revert/log). `multiloop_results` reads sibling lanes' journals
+read-only, and each iteration context carries a "Peer results" block — so a lane
+never repeats a regression a peer already measured. Only decided outcomes
+surface; a peer's in-flight half-state is invisible by construction.
+
+```
+lane A results.jsonl ─┐
+lane B results.jsonl ─┼─▶ multiloop_results ─▶ "Peer results" block in every
+lane C results.jsonl ─┘   (decided rows only)    lane's next iteration
+```
+
+## Knowledge board — durable cross-lane memory
+
+Mesh is directed and transient ("you should know this soon"). The knowledge
+board is undirected and durable ("everyone should know this forever").
+`multiloop_publish` distills a lesson — a dead end, a saturation point, a
+verifier gotcha — to `.multiloop/shared/knowledge.md`, and every lane's future
+iteration context carries the tail under "Shared knowledge". Pivot lessons
+mirror automatically, so the board fills even when nobody publishes by hand.
+
+```
+any lane ── multiloop_publish ──┐
+pivot ──── automatic mirror ────┼─▶ .multiloop/shared/knowledge.md
+                                │                │
+                                ▼                ▼
+                     every lane, every future iteration:
+                     "Shared knowledge (N entries from all lanes)"
+```
+
+## Lane proposals — speciation with an approval gate
+
+A lane that discovers orthogonal work mid-loop cannot start a lane itself —
+workers drive exactly one loop. It files a structured proposal instead; the
+parent session surfaces it; only a human approval starts the lane, born bounded
+by the proposer's budget.
+
+```
+worker lane                    commons                      human
+    │   multiloop_propose_lane   ▼                            │
+    ├──────────────────────▶ proposals.json ── surfaces in ──▶│ /multiloop approve 3
+    │                        (pending ≤ 5, one per lane name) │        │
+    │   mesh: "approved — started as deps/run-x" ◀────────────┼────────┘
+    ▼                                                         ▼
+proposer notified either way                    new lane starts via the
+                                                standard startLoop path
+```
+
+Fleet children can propose but never approve — `multiloop_approve` and
+`multiloop_reject` are parent-only tools, enforced by the allowlist sync test.
+
+## Swarm homeostasis — convergence and confidence reflexes
+
+Two reflexes are enforced by the engine, not left to agent goodwill: when a lane
+reaches its target metric, one CONVERGED mesh broadcast tells every active
+sibling to stop or retarget instead of burning iterations; and a low-confidence
+improvement is downgraded from keep to log with a remeasure directive, so noisy
+data can never drive a permanent workspace change.
+
+```
+lane hits targetMetric ──▶ CONVERGED broadcast ──▶ every sibling's mesh inbox
+noisy "improvement"  ──▶ confidence gate      ──▶ keep downgraded to log
+                                                  (re-measure first)
+```
 ## Modes
 
 | Mode | What it does | Best for |

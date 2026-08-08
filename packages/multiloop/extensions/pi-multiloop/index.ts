@@ -46,7 +46,7 @@ import {
   establishBaseline,
   applyLogIteration,
 } from "./loop.js";
-import { sendMessage, peekMessages, readMessages, formatMessages } from "./mesh.js";
+import { sendMessage, peekMessages, readMessages, formatMessages, type MeshMessage } from "./mesh.js";
 import { appendKnowledge, readKnowledge } from "./knowledge.js";
 import { readPeerResults, formatPeerResults } from "./peers.js";
 import {
@@ -342,6 +342,42 @@ const KNOWLEDGE_PEEK_COUNT = 15;
 /** Pre-rendered shared knowledge lines, or [] when the board is empty. */
 function knowledgeLinesFor(cwd: string): string[] {
   return readKnowledge(cwd, KNOWLEDGE_PEEK_COUNT);
+}
+
+/**
+ * Swarm perception, pure reads: one summary line plus up to three detail lines
+ * (latest mesh message, latest knowledge entry, latest pending proposal).
+ * [] when the swarm is quiet — no live lanes, no traffic, no board, no queue.
+ * Shared by the live widget, /multiloop status, and the multiloop_pulse tool.
+ */
+export function buildSwarmLines(cwd: string): string[] {
+  const registry = readRegistry(cwd);
+  const live = registry.loops.filter((l) => l.status === "active" || l.status === "paused");
+  let meshPending = 0;
+  let latestMesh: MeshMessage | null = null;
+  for (const loop of live) {
+    const inbox = readMessages(cwd, { lane: loop.lane, runTag: loop.runTag });
+    meshPending += inbox.length;
+    const last = inbox[inbox.length - 1];
+    if (last && (!latestMesh || last.sentAt > latestMesh.sentAt)) latestMesh = last;
+  }
+  const knowledge = readKnowledge(cwd, Number.MAX_SAFE_INTEGER);
+  const proposals = pendingProposals(cwd);
+
+  if (live.length === 0 && meshPending === 0 && knowledge.length === 0 && proposals.length === 0) {
+    return [];
+  }
+  const lines = [
+    `Swarm: ${live.length} live lane(s) · ${meshPending} mesh pending · ${knowledge.length} knowledge entries · ${proposals.length} proposal(s) pending`,
+  ];
+  if (latestMesh) lines.push(`  latest mesh from ${latestMesh.from}: ${latestMesh.body}`);
+  const latestKnowledge = knowledge[knowledge.length - 1];
+  if (latestKnowledge) lines.push(`  latest knowledge: ${latestKnowledge}`);
+  const latestProposal = proposals[proposals.length - 1];
+  if (latestProposal) {
+    lines.push(`  proposal #${latestProposal.id} from ${latestProposal.from}: lane "${latestProposal.lane}" — /multiloop approve ${latestProposal.id} to start it`);
+  }
+  return lines;
 }
 
 /** Pending lane-proposal lines for the parent session, or [] when none. Workers propose; only this surface approves. */
@@ -1951,6 +1987,20 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.registerTool({
+    name: "multiloop_pulse",
+    label: "Multiloop Pulse",
+    description:
+      "Swarm perception, read-only: live lanes, pending mesh traffic, knowledge-board size and latest entry, and pending lane proposals — one call to see the whole organism before acting on it.",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const registry = readRegistry(ctx.cwd);
+      const overview = formatLoopStatusOverview(ctx.cwd, registry.loops, Array.from(activeStates.values()));
+      const swarm = buildSwarmLines(ctx.cwd);
+      return textResult(swarm.length === 0 ? `${overview}\nSwarm quiet: no traffic, no board, no proposals.` : `${overview}\n${swarm.join("\n")}`);
+    },
+  });
+
+  pi.registerTool({
     name: "multiloop_propose_lane",
     label: "Multiloop Propose Lane",
     description:
@@ -2085,7 +2135,7 @@ export default function (pi: ExtensionAPI) {
 
       pi.sendMessage({
         customType: "multiloop-status",
-        content: lines.join("\n"),
+        content: [...lines, ...buildSwarmLines(ctx.cwd)].join("\n"),
         display: true,
       });
       return;
@@ -2094,7 +2144,10 @@ export default function (pi: ExtensionAPI) {
     const registry = readRegistry(ctx.cwd);
     pi.sendMessage({
       customType: "multiloop-status",
-      content: formatLoopStatusOverview(ctx.cwd, registry.loops, Array.from(activeStates.values())),
+      content: [
+        formatLoopStatusOverview(ctx.cwd, registry.loops, Array.from(activeStates.values())),
+        ...buildSwarmLines(ctx.cwd),
+      ].join("\n"),
       display: true,
     });
   }
@@ -2397,14 +2450,18 @@ export default function (pi: ExtensionAPI) {
 
   function refreshLoopWidget(ctx: ExtensionContext | ExtensionCommandContext) {
     if (!ctx.hasUI) return;
-    if (activeStates.size === 0) {
+    if (activeStates.size === 0 && buildSwarmLines(ctx.cwd).length === 0) {
       ctx.ui.setWidget("multiloop-live", undefined);
       return;
     }
     ctx.ui.setWidget(
       "multiloop-live",
       (_tui, theme) =>
-        createLiveDashboardWidget(() => Array.from(activeStates.values()), theme),
+        createLiveDashboardWidget(
+          () => Array.from(activeStates.values()),
+          theme,
+          () => buildSwarmLines(ctx.cwd)
+        ),
       { placement: "belowEditor" }
     );
   }

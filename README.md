@@ -50,6 +50,7 @@ pi-multiloop gives each loop its own **lane** so they can run side by side witho
 - **Lane proposals (speciation with an approval gate)** — a lane that discovers orthogonal work files a structured proposal (`multiloop_propose_lane`) instead of starting a lane itself; the parent session surfaces pending proposals, and only a human approval (`/multiloop approve <id>`) starts the lane — born bounded by the proposer's `maxIterations` budget. Pending-queue cap and one-pending-per-lane make uncontrolled speciation structurally impossible
 - **Shared knowledge board** — `multiloop_publish` distills a durable lesson (dead end, saturation point, verifier gotcha) to `.multiloop/shared/knowledge.md`; every lane's future iteration context carries it under "Shared knowledge". Pivot lessons are mirrored automatically, so the board fills even if nobody publishes by hand
 - **Peer results** — `multiloop_results` reads sibling lanes' decided outcomes (keep/revert/log with a metric), newest last, excluding the caller's own lane; the same bounded tail folds into every iteration context as a "Peer results" block, so a lane never repeats a regression another lane already measured. Read-only, file-based — the shared-journal pattern (Optuna's JournalStorage), no live IPC
+- **Swarm pulse (proprioception)** — the live widget, `/multiloop status`, and the `multiloop_pulse` tool all render one swarm block: live lanes, pending mesh traffic, knowledge-board size and latest entry, and pending proposals. Pure reads, no new state — agents and humans see the same truth
 - **Swarm homeostasis** — when a lane reaches its target metric, the extension broadcasts one `CONVERGED` mesh message to every active sibling (surfacing in their next iteration context), so the swarm stops or retargets instead of burning iterations after the goal is met; and a low-confidence improvement (MAD) is mechanically downgraded from keep to log with a remeasure directive — noisy data never becomes a permanent change or a sibling's peer result
 
 ## Install
@@ -224,6 +225,26 @@ lane hits targetMetric ──▶ CONVERGED broadcast ──▶ every sibling's m
 noisy "improvement"  ──▶ confidence gate      ──▶ keep downgraded to log
                                                   (re-measure first)
 ```
+## Swarm pulse — the organism feels itself
+
+Every perception channel above writes to disk; the pulse reads it back. The
+live widget now carries a swarm block under the lane rows, `/multiloop status`
+shows it, and fleet children can call `multiloop_pulse` to see the same swarm
+the human sees — live lanes, mesh traffic, knowledge, pending proposals — so a
+worker can check the whole organism before proposing to change it.
+
+```
+live widget / /multiloop status / multiloop_pulse
+        │
+        ▼   (pure reads — cannot break a loop, it never touches one)
+  registry.json + mesh inboxes + knowledge.md + proposals.json
+        │
+        ▼
+  Swarm: 2 live lane(s) · 3 mesh pending · 12 knowledge entries · 1 proposal pending
+    latest mesh from perf/run-1: verify flaky under load
+    proposal #2 from quant/run-2: lane "deps" — /multiloop approve 2 to start it
+```
+
 ## Modes
 
 | Mode | What it does | Best for |

@@ -162,7 +162,8 @@ export function formatLoopSummary(state: LoopState): string[] {
  */
 export function createLiveDashboardWidget(
   getStates: () => LoopState[],
-  theme: Pick<Theme, "fg">
+  theme: Pick<Theme, "fg">,
+  getSwarmLines: () => string[] = () => []
 ): Component {
   return {
     render(width: number): string[] {
@@ -175,6 +176,9 @@ export function createLiveDashboardWidget(
       if (rows.length > MAX_DASHBOARD_ROWS) {
         lines.push(theme.fg("muted", `… ${rows.length - MAX_DASHBOARD_ROWS} more; run /multiloop status`));
       }
+      // Swarm perception: mesh/knowledge/proposal lines read live per paint,
+      // same discipline as the lane rows above.
+      lines.push(...getSwarmLines().map((line) => theme.fg("muted", line)));
       return lines.map((line) => truncateToWidth(line, Math.max(8, width)));
     },
     invalidate(): void {

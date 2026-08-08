@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- Added the **swarm pulse**: a shared perception layer over the whole
+  organism. `buildSwarmLines` renders one block — live lanes, pending mesh
+  traffic, knowledge-board size and latest entry, pending proposals — into
+  the live widget (via a new `getSwarmLines` getter), `/multiloop status`,
+  and the new read-only `multiloop_pulse` tool (fleet-allowlisted, so workers
+  and humans read the same truth). The widget now stays visible when the
+  swarm has content even with no attached loops — a pending proposal with no
+  running lanes is exactly when the surface matters.
 - Added **lane proposals** — speciation with an approval gate. Workers file
   structured proposals (`multiloop_propose_lane`) for orthogonal work
   discovered mid-loop instead of starting lanes themselves; proposals land in

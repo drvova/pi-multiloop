@@ -326,8 +326,13 @@ node packages/multiloop-run/bin/multiloop-run.mjs <repo> <lane> [<runTag>] --ite
 
 ## Architecture
 
+<p align="center"><img src="assets/architecture.svg" alt="pi-multiloop organism: five packages over one shared state substrate" width="720"></p>
+
 The system is five packages that compose as one organism — one brain, one
 session core, two execution faces, one front door:
+
+<details>
+<summary>Text version</summary>
 
 ```
 multiloop-skill            setup wizard → multiloop_start
@@ -343,6 +348,8 @@ in-session fleet face   detached CLI face
 fleet widget, steering   cron/CI, poll-and-reap
         └──── both delegate protocol to the extension's tools ────┘
 ```
+
+</details>
 
 Neither face encodes loop protocol — both get it from the extension's tool
 outputs (the detached driver's prompt is a thin kick that calls
@@ -370,6 +377,7 @@ cd pi-multiloop
 npm install
 npx tsc --noEmit     # typecheck
 npx vitest run       # tests
+npm run diagrams     # regenerate assets/architecture.svg from docs/diagrams/architecture.mmd
 pi install .         # load locally
 ```
 

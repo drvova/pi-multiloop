@@ -1,0 +1,18 @@
+%% pi-multiloop organism: one brain, one session core, two faces, one front door,
+%% all over a single on-disk state substrate.
+%% Regenerate: npm run diagrams
+flowchart TD
+    skill["@multiloop/skill<br/>setup wizard skill"]
+    ext["@multiloop/extension<br/>THE BRAIN — state machine, tools,<br/>anchors, mesh, knowledge, proposals"]
+    core["@multiloop/child-agent<br/>THE SESSION CORE —<br/>isolated child sessions"]
+    agent["@multiloop/agent<br/>fleet face — background Loop Runners,<br/>widget, steering"]
+    run["@multiloop/run<br/>detached CLI face —<br/>headless pi, poll-and-reap"]
+    state[(".multiloop/<br/>results · state · mesh inboxes<br/>knowledge board · proposals")]
+
+    skill -->|guides the first start| ext
+    ext -->|loads inline into every child| core
+    core --> agent
+    core --> run
+    agent ---|shares| state
+    run ---|shares| state
+    ext ---|owns| state

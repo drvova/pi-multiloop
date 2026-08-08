@@ -30,7 +30,12 @@ mkdir -p "$REPO"
 node "$ROOT/scripts/e2e-mkloop.mjs" "$REPO" opt run-001 >/dev/null || exit 1
 
 echo "== driving detached optimize loop (2 iterations, real headless pi) =="
-node "$ROOT/packages/multiloop-run/bin/multiloop-run.mjs" "$REPO" opt run-001 --iterations 2 --timeout-sec 480 || {
+# Timeout note: the thin-kick prompt adds one round-trip (multiloop_resume) per
+# iteration, and iteration 1 also pays session load + baseline establishment in
+# the same window. 480s was calibrated to the old inline-protocol prompt; align
+# with the driver's own default (900s) so slow/local models are not failed for
+# being slow.
+node "$ROOT/packages/multiloop-run/bin/multiloop-run.mjs" "$REPO" opt run-001 --iterations 2 --timeout-sec 900 || {
   echo "FAIL: driver exited non-zero"
   exit 1
 }

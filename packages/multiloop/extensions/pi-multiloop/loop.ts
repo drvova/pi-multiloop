@@ -21,7 +21,8 @@ import {
   isImprovement,
   formatDelta,
 } from "./metrics.js";
-import { updateLoopStatus, formatLaneId } from "./lanes.js";
+import { updateLoopStatus, formatLaneId, readRegistry } from "./lanes.js";
+import { sendMessage } from "./mesh.js";
 import { appendKnowledge } from "./knowledge.js";
 import { resolveAcceptanceMode } from "./verifiers.js";
 
@@ -91,6 +92,18 @@ export function decide(
 
   if (improved) {
     const delta = formatDelta(baseline, measurement.median, state.metricDirection);
+    if (measurement.confidence === "low") {
+      // Jidoka gate: a low-confidence improvement is an abnormality, not a win.
+      // Downgrade keep to log so noisy data never drives a permanent workspace
+      // change — and never enters sibling lanes' peer results as a keep. The
+      // iteration still completes; the directive is to remeasure with more
+      // samples (raise minMeasurements) and try the hypothesis again.
+      return {
+        action: "log",
+        reason: `Possible improvement ${delta} but confidence is low (MAD noise too high) — not kept. Remeasure with more samples (raise minMeasurements) to confirm.`,
+        shouldEscalate: false,
+      };
+    }
     return {
       action: "keep",
       reason: `Improvement: ${delta} (confidence: ${measurement.confidence})`,
@@ -192,6 +205,28 @@ export function completeIfStopConditionMet(
 
   state.status = "completed";
   updateLoopStatus(cwd, id, "completed");
+
+  // Swarm homeostasis: reaching the metric target is a swarm-level event, not
+  // a lane-private one. Broadcast once to every active sibling so the other
+  // lanes learn at their next iterate that the shared goal may be satisfied —
+  // and can stop or retarget instead of burning iterations. Iteration-cap
+  // completions are not convergence and do not broadcast.
+  // Single-fire is structural: the status guard above returns null on re-entry.
+  if (stop.kind === "target-metric") {
+    const self = formatLaneId(id);
+    for (const loop of readRegistry(cwd).loops) {
+      if (loop.status !== "active") continue;
+      const sibling = `${loop.lane}/${loop.runTag}`;
+      if (sibling === self) continue;
+      sendMessage(
+        cwd,
+        id,
+        { lane: loop.lane, runTag: loop.runTag },
+        `CONVERGED: ${self} reached its target at iteration ${state.iteration} — ${stop.message} Review peer results and consider stopping or retargeting rather than spending more iterations.`
+      );
+    }
+  }
+
   return stop;
 }
 
